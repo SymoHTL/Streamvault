@@ -1,0 +1,66 @@
+# .NET
+bin/
+obj/
+publish/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio
+.vs/
+*.rsuser
+*.sln.iml
+
+# JetBrains Rider
+.idea/
+
+# Node / React
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.eslintcache
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+appsettings.Development.json
+appsettings.Local.json
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Docker
+docker-compose.override.yml
+
+# Data / runtime
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Test results
+TestResults/
+coverage/
+*.coverage
+*.coveragexml

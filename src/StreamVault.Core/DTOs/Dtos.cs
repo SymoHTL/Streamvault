@@ -1,0 +1,276 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace StreamVault.Core.DTOs;
+
+// === Auth ===
+public record LoginRequest(
+    [Required] string Username,
+    [Required] string Password
+);
+
+public record AuthResponse(
+    string AccessToken,
+    string RefreshToken,
+    DateTime ExpiresAt,
+    UserResponse User
+);
+
+public record RefreshTokenRequest(
+    [Required] string RefreshToken
+);
+
+// === Setup ===
+public record SetupStatusResponse(bool IsSetupRequired);
+
+public record SetupRequest(
+    [Required] string AdminUsername,
+    [Required, EmailAddress] string AdminEmail,
+    [Required, MinLength(8)] string AdminPassword,
+    [Required] S3ConnectionRequest S3Connection,
+    [Required] LibraryRequest InitialLibrary,
+    string? TmdbApiKey,
+    string? OpenSubtitlesApiKey
+);
+
+// === Users ===
+public record UserResponse(
+    Guid Id,
+    string Username,
+    string Email,
+    string Role,
+    DateTime CreatedAt
+);
+
+public record CreateUserRequest(
+    [Required] string Username,
+    [Required, EmailAddress] string Email,
+    [Required, MinLength(8)] string Password,
+    string Role = "User"
+);
+
+public record UpdateUserRequest(
+    string? Username,
+    string? Email,
+    string? Password,
+    string? Role
+);
+
+public record UpdateProfileRequest(
+    string? Email,
+    string? Password,
+    string? PreferencesJson
+);
+
+// === S3 Connections ===
+public record S3ConnectionRequest(
+    [Required] string Name,
+    [Required] string Endpoint,
+    [Required] string Bucket,
+    [Required] string AccessKey,
+    [Required] string SecretKey,
+    string Region = "us-east-1",
+    bool ForcePathStyle = true
+);
+
+public record S3ConnectionResponse(
+    Guid Id,
+    string Name,
+    string Endpoint,
+    string Bucket,
+    string Region,
+    bool ForcePathStyle,
+    DateTime CreatedAt
+);
+
+// === Libraries ===
+public record LibraryRequest(
+    [Required] string Name,
+    [Required] string Type,
+    [Required] Guid S3ConnectionId,
+    string S3Prefix = "",
+    string ScanScheduleCron = "0 */6 * * *"
+);
+
+public record LibraryResponse(
+    Guid Id,
+    string Name,
+    string Type,
+    string S3Prefix,
+    string ScanScheduleCron,
+    string ScanStatus,
+    DateTime? LastScannedAt,
+    Guid S3ConnectionId,
+    int ItemCount,
+    DateTime CreatedAt
+);
+
+// === Media Items ===
+public record MediaItemResponse(
+    Guid Id,
+    string Title,
+    string SortTitle,
+    int? Year,
+    string? Overview,
+    double? CommunityRating,
+    int? RuntimeMinutes,
+    string MediaType,
+    DateTime AddedAt,
+    Guid LibraryId,
+    IReadOnlyList<string> Genres,
+    IReadOnlyList<MediaFileResponse> MediaFiles,
+    IReadOnlyList<MediaImageResponse> Images,
+    IReadOnlyList<PersonResponse> Cast,
+    IReadOnlyList<ExternalIdResponse> ExternalIds,
+    bool IsInWatchlist
+);
+
+public record MediaItemSummaryResponse(
+    Guid Id,
+    string Title,
+    int? Year,
+    double? CommunityRating,
+    string MediaType,
+    string? PosterPath,
+    DateTime AddedAt,
+    WatchProgressResponse? Progress
+);
+
+public record MediaFileResponse(
+    Guid Id,
+    string S3Key,
+    string Container,
+    string? VideoCodec,
+    string? AudioCodec,
+    string? Resolution,
+    double? DurationSeconds,
+    IReadOnlyList<SubtitleResponse> Subtitles
+);
+
+public record SubtitleResponse(
+    Guid Id,
+    string Language,
+    string Format,
+    bool IsExternal,
+    bool IsForced
+);
+
+public record MediaImageResponse(
+    Guid Id,
+    string Type,
+    string Url
+);
+
+public record PersonResponse(
+    Guid Id,
+    string Name,
+    string Role,
+    string? Character,
+    int Order
+);
+
+public record ExternalIdResponse(
+    string Provider,
+    string ExternalKey
+);
+
+// === TV Shows ===
+public record TvShowDetailResponse(
+    Guid Id,
+    string Title,
+    int? Year,
+    string? Overview,
+    double? CommunityRating,
+    string? PosterPath,
+    string? BackdropPath,
+    IReadOnlyList<string> Genres,
+    IReadOnlyList<SeasonResponse> Seasons,
+    IReadOnlyList<PersonResponse> Cast,
+    bool IsInWatchlist
+);
+
+public record SeasonResponse(
+    Guid Id,
+    int SeasonNumber,
+    string? Name,
+    IReadOnlyList<EpisodeResponse> Episodes
+);
+
+public record EpisodeResponse(
+    Guid Id,
+    int EpisodeNumber,
+    string Title,
+    string? Overview,
+    int? RuntimeMinutes,
+    IReadOnlyList<MediaFileResponse> MediaFiles,
+    WatchProgressResponse? Progress
+);
+
+// === Progress ===
+public record UpdateProgressRequest(
+    long PositionTicks,
+    bool Completed
+);
+
+public record WatchProgressResponse(
+    Guid MediaFileId,
+    long PositionTicks,
+    bool Completed,
+    DateTime LastWatchedAt,
+    double? DurationSeconds
+);
+
+// === Watchlist ===
+public record WatchlistResponse(
+    IReadOnlyList<MediaItemSummaryResponse> Items,
+    int TotalCount
+);
+
+// === Home ===
+public record HomeResponse(
+    IReadOnlyList<MediaItemSummaryResponse> ContinueWatching,
+    IReadOnlyList<MediaItemSummaryResponse> RecentlyAdded,
+    IReadOnlyList<MediaItemSummaryResponse> RecentlyWatched,
+    MediaItemSummaryResponse? FeaturedItem
+);
+
+// === Admin ===
+public record DashboardResponse(
+    int ActiveStreams,
+    int TotalLibraries,
+    int TotalMediaItems,
+    int TotalUsers,
+    IReadOnlyList<ActivityLogEntry> RecentActivity
+);
+
+public record ActivityLogEntry(
+    string Type,
+    string Description,
+    DateTime Timestamp,
+    string? UserId
+);
+
+// === Search ===
+public record SearchResponse(
+    IReadOnlyList<MediaItemSummaryResponse> Movies,
+    IReadOnlyList<MediaItemSummaryResponse> TvShows,
+    int TotalResults
+);
+
+// === Pagination ===
+public record PaginatedResponse<T>(
+    IReadOnlyList<T> Items,
+    int TotalCount,
+    int Page,
+    int PageSize
+);
+
+// === Metadata Identify ===
+public record IdentifyRequest(
+    int TmdbId,
+    bool IsMovie
+);
+
+public record IdentifySearchRequest(
+    [Required] string Query,
+    int? Year
+);

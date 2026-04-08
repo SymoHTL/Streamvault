@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StreamVault.Api/StreamVault.Api.csproj" />
+    <Project Path="src/StreamVault.Core/StreamVault.Core.csproj" />
+    <Project Path="src/StreamVault.Infrastructure/StreamVault.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/StreamVault.Api.Tests/StreamVault.Api.Tests.csproj" />
+    <Project Path="tests/StreamVault.Core.Tests/StreamVault.Core.Tests.csproj" />
+  </Folder>
+</Solution>
