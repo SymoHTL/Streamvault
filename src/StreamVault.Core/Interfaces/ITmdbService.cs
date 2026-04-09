@@ -8,6 +8,7 @@ public interface ITmdbService
     Task<TmdbSearchResult?> SearchTvShowAsync(string title, int? year, CancellationToken ct = default);
     Task<IReadOnlyList<TmdbSearchResult>> SearchMultiAsync(string query, CancellationToken ct = default);
     Task ApplyMetadataAsync(Guid mediaItemId, int tmdbId, bool isMovie, CancellationToken ct = default);
+    Task SearchAndApplyAsync(Guid mediaItemId, string title, int? year, bool isMovie, CancellationToken ct = default);
 }
 
 public record TmdbSearchResult(

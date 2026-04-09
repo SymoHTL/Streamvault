@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { ArrowLeft } from 'lucide-react';
@@ -25,6 +25,8 @@ export default function PlayerPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<ShakaPlayer | null>(null);
   const progressInterval = useRef<ReturnType<typeof setInterval>>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const reportProgress = useCallback(async () => {
     if (!videoRef.current || !mediaFileId) return;
@@ -40,11 +42,23 @@ export default function PlayerPage() {
     if (!mediaFileId || !videoRef.current) return;
 
     const video = videoRef.current;
-    const streamUrl = api.stream.directUrl(mediaFileId);
+    let cancelled = false;
 
-    // Try native playback first; if supported, no Shaka needed for direct URLs
-    video.src = streamUrl;
-    video.play().catch(() => {});
+    async function loadStream() {
+      try {
+        const { url } = await api.stream.getDirectUrl(mediaFileId!);
+        if (cancelled) return;
+        video.src = url;
+        setLoading(false);
+        video.play().catch(() => {});
+      } catch (err) {
+        if (cancelled) return;
+        setError('Failed to load video stream');
+        setLoading(false);
+      }
+    }
+
+    loadStream();
 
     // Report progress every 10 seconds
     progressInterval.current = setInterval(reportProgress, 10_000);
@@ -56,6 +70,7 @@ export default function PlayerPage() {
     video.addEventListener('ended', handleEnded);
 
     return () => {
+      cancelled = true;
       if (progressInterval.current) clearInterval(progressInterval.current);
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('ended', handleEnded);
@@ -73,6 +88,16 @@ export default function PlayerPage() {
           <ArrowLeft size={24} />
         </button>
       </div>
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center text-white">
+          Loading...
+        </div>
+      )}
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center text-red-400">
+          {error}
+        </div>
+      )}
       <video
         ref={videoRef}
         className="w-full h-full"

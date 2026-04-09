@@ -34,8 +34,8 @@ public class StreamController : BaseController
         var library = mediaFile.MediaItem?.Library ?? mediaFile.Episode?.Season.MediaItem.Library;
         if (library == null) return NotFound();
 
-        var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromHours(4));
-        return Redirect(url);
+        var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromMinutes(55));
+        return Ok(new { url });
     }
 
     [HttpGet("{mediaFileId:guid}/transcode/{profileName}")]
@@ -103,7 +103,7 @@ public class StreamController : BaseController
             var library = subtitle.MediaFile.MediaItem?.Library ?? subtitle.MediaFile.Episode?.Season.MediaItem.Library;
             if (library == null) return NotFound();
 
-            var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, subtitle.S3Key, TimeSpan.FromHours(4));
+            var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, subtitle.S3Key, TimeSpan.FromMinutes(55));
             return Redirect(url);
         }
 

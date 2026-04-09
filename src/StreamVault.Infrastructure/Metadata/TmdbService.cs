@@ -180,6 +180,30 @@ public class TmdbService : ITmdbService
         }
     }
 
+    public async Task SearchAndApplyAsync(Guid mediaItemId, string title, int? year, bool isMovie, CancellationToken ct = default)
+    {
+        try
+        {
+            TmdbSearchResult? result;
+            if (isMovie)
+                result = await SearchMovieAsync(title, year, ct);
+            else
+                result = await SearchTvShowAsync(title, year, ct);
+
+            if (result == null)
+            {
+                _logger.LogWarning("No TMDB result for {Title} ({Year})", title, year);
+                return;
+            }
+
+            await ApplyMetadataAsync(mediaItemId, result.TmdbId, isMovie, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to auto-apply metadata for {Title}", title);
+        }
+    }
+
     private static void SetExternalId(StreamVaultDbContext db, MediaItem mediaItem, ExternalIdProvider provider, string key)
     {
         var existing = mediaItem.ExternalIds.FirstOrDefault(e => e.Provider == provider);

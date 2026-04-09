@@ -2,18 +2,28 @@ services:
   streamvault:
     build: .
     container_name: streamvault
-    ports:
-      - "8080:8080"
     volumes:
-      - streamvault-data:/data
+      - ./data:/data
     environment:
       - DataDirectory=/data
       - Redis__ConnectionString=redis:6379
-      - Jwt__Secret=change-this-to-a-secure-random-string-at-least-32-chars
-      - CorsOrigins__0=http://localhost:8080
+      - Jwt__Secret=mvRsIkrLe0nFlutjEynz1pvvU9RvVP9xWnBnJGsq9SHbhdWMSEugN8WBzn39
+      - Tmdb__ApiKey=693ef07f905cf6f8fb4146e8b2dbb621
+      - Transcoding__FfmpegPath=/usr/bin/ffmpeg
+      - CorsOrigins__0=https://stream.symo.dev
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.streamvault.rule=Host(`stream.symo.dev`)"
+      - "traefik.http.routers.streamvault.entrypoints=https"
+      - "traefik.http.routers.streamvault.tls.certresolver=letsencrypt"
+      - "traefik.http.services.streamvault.loadbalancer.server.port=8080"
+      - "traefik.docker.network=traefik_proxy"
     depends_on:
       redis:
         condition: service_healthy
+    networks:
+      - default
+      - traefik_proxy
     restart: unless-stopped
 
   redis:
@@ -29,5 +39,8 @@ services:
     restart: unless-stopped
 
 volumes:
-  streamvault-data:
   redis-data:
+
+networks:
+  traefik_proxy:
+    external: true

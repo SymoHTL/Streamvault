@@ -13,18 +13,16 @@ COPY *.slnx ./
 COPY src/StreamVault.Core/*.csproj src/StreamVault.Core/
 COPY src/StreamVault.Infrastructure/*.csproj src/StreamVault.Infrastructure/
 COPY src/StreamVault.Api/*.csproj src/StreamVault.Api/
-COPY tests/StreamVault.Core.Tests/*.csproj tests/StreamVault.Core.Tests/
-COPY tests/StreamVault.Api.Tests/*.csproj tests/StreamVault.Api.Tests/
-RUN dotnet restore
+RUN dotnet restore src/StreamVault.Api
 COPY . .
 RUN dotnet publish src/StreamVault.Api -c Release -o /app/publish --no-restore
 
 # Runtime
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS runtime
 
-# Install FFmpeg
+# Install FFmpeg and curl (curl needed for healthcheck)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg curl && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

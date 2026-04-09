@@ -116,7 +116,7 @@ export const api = {
   },
 
   stream: {
-    directUrl: (mediaFileId: string) => `/api/stream/${mediaFileId}/direct`,
+    getDirectUrl: (mediaFileId: string) => request<{ url: string }>(`/api/stream/${mediaFileId}/direct`),
     subtitleUrl: (mediaFileId: string, subtitleId: string) => `/api/stream/${mediaFileId}/subtitles/${subtitleId}`,
   },
 

@@ -1,3 +1,4 @@
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StreamVault.Core.Entities;
@@ -59,7 +60,21 @@ public class LibraryScannerService : ILibraryScanner
             library.LastScannedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Scan complete for library {LibraryName}", library.Name);
+            // Enqueue metadata fetch for items that don't have TMDB data yet
+            var unmatchedItems = await db.MediaItems
+                .Where(m => m.LibraryId == library.Id && m.CommunityRating == null)
+                .Select(m => new { m.Id, m.Title, m.Year, m.MediaType })
+                .ToListAsync(ct);
+
+            foreach (var item in unmatchedItems)
+            {
+                var isMovie = item.MediaType == MediaType.Movie;
+                BackgroundJob.Enqueue<ITmdbService>(
+                    tmdb => tmdb.SearchAndApplyAsync(item.Id, item.Title, item.Year, isMovie, CancellationToken.None));
+            }
+
+            _logger.LogInformation("Scan complete for library {LibraryName}. Enqueued {Count} metadata lookups.",
+                library.Name, unmatchedItems.Count);
         }
         catch (Exception ex)
         {
@@ -168,6 +183,18 @@ public class LibraryScannerService : ILibraryScanner
 
         var videoKeys = allKeys.Where(NamingConventionParser.IsVideoFile).ToList();
 
+        // Local cache to avoid re-querying DB for shows added in this scan pass
+        var showCache = new Dictionary<string, MediaItem>(StringComparer.OrdinalIgnoreCase);
+
+        // Pre-load existing shows into cache
+        var existingShows = await db.MediaItems
+            .Include(m => m.Seasons)
+            .ThenInclude(s => s.Episodes)
+            .Where(m => m.LibraryId == library.Id && m.MediaType == MediaType.TvShow)
+            .ToListAsync(ct);
+        foreach (var s in existingShows)
+            showCache[s.Title] = s;
+
         foreach (var videoKey in videoKeys)
         {
             if (existingKeys.Contains(videoKey)) continue;
@@ -179,15 +206,8 @@ public class LibraryScannerService : ILibraryScanner
                 continue;
             }
 
-            // Find or create TV show
-            var show = await db.MediaItems
-                .Include(m => m.Seasons)
-                .ThenInclude(s => s.Episodes)
-                .FirstOrDefaultAsync(m => m.LibraryId == library.Id
-                    && m.Title == parsed.ShowTitle
-                    && m.MediaType == MediaType.TvShow, ct);
-
-            if (show == null)
+            // Find or create TV show using local cache
+            if (!showCache.TryGetValue(parsed.ShowTitle, out var show))
             {
                 show = new MediaItem
                 {
@@ -198,6 +218,7 @@ public class LibraryScannerService : ILibraryScanner
                     LibraryId = library.Id
                 };
                 db.MediaItems.Add(show);
+                showCache[parsed.ShowTitle] = show;
             }
 
             // Find or create season
