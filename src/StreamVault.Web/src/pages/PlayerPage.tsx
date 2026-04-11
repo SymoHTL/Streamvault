@@ -219,10 +219,17 @@ export default function PlayerPage() {
     const handleEnded = () => { reportProgress(); setPaused(true); };
     const handleTimeUpdate = () => {
       setCurrentTime(video.currentTime + seekOffsetRef.current);
-      if (isFinite(video.duration) && video.duration > 0) setDuration(video.duration + seekOffsetRef.current);
+      // Only update duration from video element when we don't have a known API duration.
+      // In remux mode, video.duration reflects only what's been remuxed so far;
+      // the real duration comes from knownDurationRef (API-provided).
+      if (knownDurationRef.current <= 0 && isFinite(video.duration) && video.duration > 0) {
+        setDuration(video.duration + seekOffsetRef.current);
+      }
     };
     const handleLoadedMetadata = () => {
-      if (isFinite(video.duration) && video.duration > 0) setDuration(video.duration + seekOffsetRef.current);
+      if (knownDurationRef.current <= 0 && isFinite(video.duration) && video.duration > 0) {
+        setDuration(video.duration + seekOffsetRef.current);
+      }
       setLoading(false);
       // Restore position from audio track switch or saved progress (only when not remux-seeking)
       if (seekOffsetRef.current === 0) {
@@ -357,7 +364,7 @@ export default function PlayerPage() {
           break;
         case 'ArrowRight':
           e.preventDefault();
-          video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+          video.currentTime = Math.min(isFinite(video.duration) ? video.duration : Infinity, video.currentTime + 10);
           resetControlsTimer();
           break;
         case 'ArrowUp':
@@ -446,7 +453,9 @@ export default function PlayerPage() {
     if (!video || effectiveDuration === 0) return 0;
     for (let i = video.buffered.length - 1; i >= 0; i--) {
       if (video.buffered.start(i) <= video.currentTime) {
-        return (video.buffered.end(i) / effectiveDuration) * 100;
+        // In remux mode, buffered ranges are relative to the remux start.
+        // Add seekOffset to translate to absolute file position.
+        return ((video.buffered.end(i) + seekOffsetRef.current) / effectiveDuration) * 100;
       }
     }
     return 0;
@@ -586,7 +595,7 @@ export default function PlayerPage() {
 
           {/* Skip forward 10s */}
           <button
-            onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10); }}
+            onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(isFinite(v.duration) ? v.duration : Infinity, v.currentTime + 10); }}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             title="Forward 10s"
           >

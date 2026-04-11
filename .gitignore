@@ -64,3 +64,6 @@ TestResults/
 coverage/
 *.coverage
 *.coveragexml
+
+# Playwright MCP artifacts
+.playwright-mcp/
