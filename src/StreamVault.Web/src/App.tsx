@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from './stores/authStore';
 import { useThemeStore } from './stores/themeStore';
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
@@ -14,6 +14,8 @@ import PlayerPage from './pages/PlayerPage';
 import SearchPage from './pages/SearchPage';
 import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
+import ListsPage from './pages/ListsPage';
+import CollectionsPage from './pages/CollectionsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,7 +43,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   const theme = useThemeStore((s) => s.theme);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
 
@@ -59,6 +61,9 @@ export default function App() {
             <Route path="/library/:id" element={<LibraryPage />} />
             <Route path="/media/:id" element={<MediaDetailPage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/lists" element={<ListsPage />} />
+            <Route path="/collections" element={<CollectionsPage />} />
+            <Route path="/collections/:id" element={<CollectionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/admin/*" element={
               <AdminRoute><AdminPage /></AdminRoute>

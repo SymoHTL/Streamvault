@@ -25,7 +25,11 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<MediaImage> MediaImages => Set<MediaImage>();
     public DbSet<WatchProgress> WatchProgresses => Set<WatchProgress>();
     public DbSet<WatchlistItem> WatchlistItems => Set<WatchlistItem>();
+    public DbSet<UserMediaList> UserMediaLists => Set<UserMediaList>();
+    public DbSet<Collection> Collections => Set<Collection>();
+    public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
     public DbSet<TranscodeProfile> TranscodeProfiles => Set<TranscodeProfile>();
+    public DbSet<AudioTrack> AudioTracks => Set<AudioTrack>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -103,6 +107,13 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
             .WithMany(mf => mf.Subtitles)
             .HasForeignKey(s => s.MediaFileId);
 
+        // AudioTrack -> MediaFile
+        modelBuilder.Entity<AudioTrack>()
+            .HasOne(at => at.MediaFile)
+            .WithMany(mf => mf.AudioTracks)
+            .HasForeignKey(at => at.MediaFileId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         // WatchProgress unique per user+mediafile
         modelBuilder.Entity<WatchProgress>()
             .HasIndex(wp => new { wp.UserId, wp.MediaFileId })
@@ -138,6 +149,43 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
             .HasOne(rt => rt.User)
             .WithMany(u => u.RefreshTokens)
             .HasForeignKey(rt => rt.UserId);
+
+        // UserMediaList unique per user+mediaitem
+        modelBuilder.Entity<UserMediaList>()
+            .HasIndex(uml => new { uml.UserId, uml.MediaItemId })
+            .IsUnique();
+
+        modelBuilder.Entity<UserMediaList>()
+            .HasOne(uml => uml.User)
+            .WithMany(u => u.MediaLists)
+            .HasForeignKey(uml => uml.UserId);
+
+        modelBuilder.Entity<UserMediaList>()
+            .HasOne(uml => uml.MediaItem)
+            .WithMany(m => m.UserMediaLists)
+            .HasForeignKey(uml => uml.MediaItemId);
+
+        // Collection -> User
+        modelBuilder.Entity<Collection>()
+            .HasOne(c => c.CreatedBy)
+            .WithMany(u => u.Collections)
+            .HasForeignKey(c => c.CreatedByUserId);
+
+        // CollectionItem
+        modelBuilder.Entity<CollectionItem>()
+            .HasIndex(ci => new { ci.CollectionId, ci.MediaItemId })
+            .IsUnique();
+
+        modelBuilder.Entity<CollectionItem>()
+            .HasOne(ci => ci.Collection)
+            .WithMany(c => c.Items)
+            .HasForeignKey(ci => ci.CollectionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CollectionItem>()
+            .HasOne(ci => ci.MediaItem)
+            .WithMany(m => m.CollectionItems)
+            .HasForeignKey(ci => ci.MediaItemId);
 
         // ExternalId -> MediaItem
         modelBuilder.Entity<ExternalId>()

@@ -39,8 +39,10 @@ try
     builder.Services.AddInfrastructure(builder.Configuration);
 
     // Data Protection (encrypts S3 secrets at rest)
+    var keysDir = Path.Combine(settings.DataDirectory, "keys");
+    Directory.CreateDirectory(keysDir);
     builder.Services.AddDataProtection()
-        .PersistKeysToDbContext<StreamVaultDbContext>()
+        .PersistKeysToFileSystem(new DirectoryInfo(keysDir))
         .SetApplicationName("StreamVault");
 
     // Authentication
@@ -59,14 +61,15 @@ try
                     settings.Jwt.Secret.Length >= 32 ? settings.Jwt.Secret : settings.Jwt.Secret.PadRight(32, '!')))
             };
 
-            // Support JWT in SignalR query string
+            // Support JWT in SignalR and stream proxy query string
             options.Events = new JwtBearerEvents
             {
                 OnMessageReceived = context =>
                 {
                     var accessToken = context.Request.Query["access_token"];
                     var path = context.HttpContext.Request.Path;
-                    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    if (!string.IsNullOrEmpty(accessToken) &&
+                        (path.StartsWithSegments("/hubs") || path.Value?.Contains("/api/stream") == true))
                     {
                         context.Token = accessToken;
                     }
@@ -135,6 +138,112 @@ try
     {
         var db = scope.ServiceProvider.GetRequiredService<StreamVaultDbContext>();
         await db.Database.EnsureCreatedAsync();
+
+        // Add tables for new features (Lists, Collections) to existing databases
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS UserMediaLists (
+                Id TEXT NOT NULL PRIMARY KEY,
+                UserId TEXT NOT NULL,
+                MediaItemId TEXT NOT NULL,
+                Status INTEGER NOT NULL DEFAULT 0,
+                Rating INTEGER NULL,
+                Notes TEXT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (UserId) REFERENCES Users(Id),
+                FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id)
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_UserMediaLists_UserId_MediaItemId
+            ON UserMediaLists (UserId, MediaItemId);
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS Collections (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Name TEXT NOT NULL,
+                Description TEXT NULL,
+                PosterUrl TEXT NULL,
+                BackdropUrl TEXT NULL,
+                SortOrder INTEGER NOT NULL DEFAULT 0,
+                TmdbCollectionId INTEGER NULL,
+                CreatedByUserId TEXT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (CreatedByUserId) REFERENCES Users(Id)
+            );
+            """);
+        // Migrate existing Collections table: make CreatedByUserId nullable, add TmdbCollectionId
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE Collections ADD COLUMN TmdbCollectionId INTEGER NULL;");
+        }
+        catch { /* Column already exists */ }
+        // SQLite can't ALTER NOT NULL -> NULL, so rebuild the table if needed
+        {
+            var hasNotNull = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS \"Value\" FROM pragma_table_info('Collections') WHERE name='CreatedByUserId' AND \"notnull\"=1"
+            ).FirstOrDefaultAsync();
+            if (hasNotNull > 0)
+            {
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE Collections_new (
+                        Id TEXT NOT NULL PRIMARY KEY,
+                        Name TEXT NOT NULL,
+                        Description TEXT NULL,
+                        PosterUrl TEXT NULL,
+                        BackdropUrl TEXT NULL,
+                        SortOrder INTEGER NOT NULL DEFAULT 0,
+                        TmdbCollectionId INTEGER NULL,
+                        CreatedByUserId TEXT NULL,
+                        CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        FOREIGN KEY (CreatedByUserId) REFERENCES Users(Id)
+                    );
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO Collections_new (Id, Name, Description, PosterUrl, BackdropUrl, SortOrder, TmdbCollectionId, CreatedByUserId, CreatedAt, UpdatedAt)
+                    SELECT Id, Name, Description, PosterUrl, BackdropUrl, SortOrder, TmdbCollectionId, CreatedByUserId, CreatedAt, UpdatedAt
+                    FROM Collections;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE Collections;");
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE Collections_new RENAME TO Collections;");
+            }
+        }
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS CollectionItems (
+                Id TEXT NOT NULL PRIMARY KEY,
+                CollectionId TEXT NOT NULL,
+                MediaItemId TEXT NOT NULL,
+                SortOrder INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (CollectionId) REFERENCES Collections(Id) ON DELETE CASCADE,
+                FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id)
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_CollectionItems_CollectionId_MediaItemId
+            ON CollectionItems (CollectionId, MediaItemId);
+            """);
+
+        // AudioTracks table for audio track switching
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS AudioTracks (
+                Id TEXT NOT NULL PRIMARY KEY,
+                StreamIndex INTEGER NOT NULL,
+                Language TEXT NOT NULL DEFAULT 'und',
+                Title TEXT NULL,
+                Codec TEXT NOT NULL DEFAULT '',
+                Channels INTEGER NOT NULL DEFAULT 2,
+                MediaFileId TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (MediaFileId) REFERENCES MediaFiles(Id) ON DELETE CASCADE
+            );
+            """);
+
     }
 
     // Middleware pipeline

@@ -13,4 +13,6 @@ public class User : BaseEntity
     public ICollection<RefreshToken> RefreshTokens { get; set; } = [];
     public ICollection<WatchProgress> WatchProgresses { get; set; } = [];
     public ICollection<WatchlistItem> WatchlistItems { get; set; } = [];
+    public ICollection<UserMediaList> MediaLists { get; set; } = [];
+    public ICollection<Collection> Collections { get; set; } = [];
 }

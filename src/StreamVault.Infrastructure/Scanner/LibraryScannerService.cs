@@ -12,15 +12,18 @@ public class LibraryScannerService : ILibraryScanner
 {
     private readonly IDbContextFactory<StreamVaultDbContext> _dbFactory;
     private readonly IS3StorageService _s3;
+    private readonly IMediaProbeService _probe;
     private readonly ILogger<LibraryScannerService> _logger;
 
     public LibraryScannerService(
         IDbContextFactory<StreamVaultDbContext> dbFactory,
         IS3StorageService s3,
+        IMediaProbeService probe,
         ILogger<LibraryScannerService> logger)
     {
         _dbFactory = dbFactory;
         _s3 = s3;
+        _probe = probe;
         _logger = logger;
     }
 
@@ -56,6 +59,25 @@ public class LibraryScannerService : ILibraryScanner
                     break;
             }
 
+            // Backfill: probe existing files that haven't been probed yet
+            var unprobedFiles = await db.MediaFiles
+                .Include(mf => mf.AudioTracks)
+                .Where(mf => mf.AudioTracks.Count == 0
+                    && ((mf.MediaItem != null && mf.MediaItem.LibraryId == library.Id)
+                        || (mf.Episode != null && mf.Episode.Season.MediaItem.LibraryId == library.Id)))
+                .ToListAsync(ct);
+
+            if (unprobedFiles.Count > 0)
+            {
+                _logger.LogInformation("Probing {Count} previously unprobed files in library {LibraryName}",
+                    unprobedFiles.Count, library.Name);
+                foreach (var mf in unprobedFiles)
+                {
+                    await ProbeMediaFileAsync(db, mf, library.S3ConnectionId, ct);
+                }
+                await db.SaveChangesAsync(ct);
+            }
+
             library.ScanStatus = LibraryScanStatus.Idle;
             library.LastScannedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
@@ -71,6 +93,63 @@ public class LibraryScannerService : ILibraryScanner
                 var isMovie = item.MediaType == MediaType.Movie;
                 BackgroundJob.Enqueue<ITmdbService>(
                     tmdb => tmdb.SearchAndApplyAsync(item.Id, item.Title, item.Year, isMovie, CancellationToken.None));
+            }
+
+            // Re-fetch metadata for TV shows that have TMDB data but episodes without overviews
+            if (library.Type == MediaType.TvShow)
+            {
+                var showsNeedingEpisodeUpdate = await db.MediaItems
+                    .Where(m => m.LibraryId == library.Id
+                        && m.MediaType == MediaType.TvShow
+                        && m.CommunityRating != null
+                        && m.ExternalIds.Any(e => e.Provider == ExternalIdProvider.Tmdb)
+                        && m.Seasons.Any(s => s.Episodes.Any(ep => ep.Overview == null)))
+                    .Select(m => new
+                    {
+                        m.Id,
+                        TmdbId = m.ExternalIds.First(e => e.Provider == ExternalIdProvider.Tmdb).ExternalKey
+                    })
+                    .ToListAsync(ct);
+
+                foreach (var show in showsNeedingEpisodeUpdate)
+                {
+                    if (int.TryParse(show.TmdbId, out var tmdbId))
+                    {
+                        BackgroundJob.Enqueue<ITmdbService>(
+                            tmdb => tmdb.ApplyMetadataAsync(show.Id, tmdbId, false, CancellationToken.None));
+                    }
+                }
+
+                _logger.LogInformation("Enqueued {Count} TV show episode metadata refreshes.", showsNeedingEpisodeUpdate.Count);
+            }
+
+            // Re-apply TMDB metadata for movies that have TMDB IDs but aren't in any collection yet
+            if (library.Type == MediaType.Movie)
+            {
+                var moviesNeedingCollection = await db.MediaItems
+                    .Where(m => m.LibraryId == library.Id
+                        && m.MediaType == MediaType.Movie
+                        && m.CommunityRating != null
+                        && m.ExternalIds.Any(e => e.Provider == ExternalIdProvider.Tmdb)
+                        && !m.CollectionItems.Any(ci => ci.Collection.TmdbCollectionId != null))
+                    .Select(m => new
+                    {
+                        m.Id,
+                        TmdbId = m.ExternalIds.First(e => e.Provider == ExternalIdProvider.Tmdb).ExternalKey
+                    })
+                    .ToListAsync(ct);
+
+                foreach (var movie in moviesNeedingCollection)
+                {
+                    if (int.TryParse(movie.TmdbId, out var tmdbId))
+                    {
+                        BackgroundJob.Enqueue<ITmdbService>(
+                            tmdb => tmdb.ApplyMetadataAsync(movie.Id, tmdbId, true, CancellationToken.None));
+                    }
+                }
+
+                if (moviesNeedingCollection.Count > 0)
+                    _logger.LogInformation("Enqueued {Count} movies for TMDB collection check.", moviesNeedingCollection.Count);
             }
 
             _logger.LogInformation("Scan complete for library {LibraryName}. Enqueued {Count} metadata lookups.",
@@ -133,6 +212,9 @@ public class LibraryScannerService : ILibraryScanner
                 MediaItemId = mediaItem.Id
             };
             db.MediaFiles.Add(mediaFile);
+
+            // Probe the file to detect codecs, resolution, audio tracks, and primary language
+            await ProbeMediaFileAsync(db, mediaFile, library.S3ConnectionId, ct);
 
             // Find associated subtitles
             var videoBaseName = Path.GetFileNameWithoutExtension(videoKey);
@@ -258,6 +340,9 @@ public class LibraryScannerService : ILibraryScanner
             };
             db.MediaFiles.Add(mediaFile);
 
+            // Probe the file to detect codecs, resolution, audio tracks, and primary language
+            await ProbeMediaFileAsync(db, mediaFile, library.S3ConnectionId, ct);
+
             _logger.LogInformation("Found TV: {Show} S{Season:D2}E{Episode:D2} - {Key}",
                 parsed.ShowTitle, parsed.SeasonNumber, parsed.EpisodeNumber, videoKey);
         }
@@ -274,5 +359,45 @@ public class LibraryScannerService : ILibraryScanner
                 return title[prefix.Length..].Trim();
         }
         return title;
+    }
+
+    /// <summary>
+    /// Probes a media file via ffprobe (using pre-signed S3 URL) to populate
+    /// codec info and audio tracks. Failures are logged but don't abort the scan.
+    /// </summary>
+    private async Task ProbeMediaFileAsync(StreamVaultDbContext db, MediaFile mediaFile, Guid s3ConnectionId, CancellationToken ct)
+    {
+        try
+        {
+            var presignedUrl = await _s3.GetPreSignedUrlAsync(s3ConnectionId, mediaFile.S3Key, TimeSpan.FromMinutes(5), ct);
+            var result = await _probe.ProbeAsync(presignedUrl, ct);
+
+            mediaFile.VideoCodec = result.VideoCodec;
+            mediaFile.AudioCodec = result.AudioCodec;
+            mediaFile.Resolution = result.Resolution;
+            mediaFile.DurationSeconds = result.DurationSeconds;
+            mediaFile.VideoBitrate = result.VideoBitrate;
+            mediaFile.FileSize = result.FileSize;
+
+            foreach (var track in result.AudioTracks)
+            {
+                db.AudioTracks.Add(new AudioTrack
+                {
+                    StreamIndex = track.StreamIndex,
+                    Language = track.Language,
+                    Title = track.Title,
+                    Codec = track.Codec,
+                    Channels = track.Channels,
+                    MediaFileId = mediaFile.Id
+                });
+            }
+
+            _logger.LogInformation("Probed {S3Key}: {Resolution} {VideoCodec} tracks={TrackCount}",
+                mediaFile.S3Key, result.Resolution, result.VideoCodec, result.AudioTracks.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to probe media file {S3Key}, will retry on next scan", mediaFile.S3Key);
+        }
     }
 }

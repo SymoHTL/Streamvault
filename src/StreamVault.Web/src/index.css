@@ -1,26 +1,66 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-primary: #6366f1;
   --color-primary-hover: #4f46e5;
   --color-surface: #ffffff;
-  --color-surface-dark: #0f172a;
+  --color-surface-dark: #0a0a0f;
   --color-surface-secondary: #f1f5f9;
-  --color-surface-secondary-dark: #1e293b;
+  --color-surface-secondary-dark: #151520;
   --color-text: #0f172a;
-  --color-text-dark: #f8fafc;
+  --color-text-dark: #f0f0f5;
   --color-muted: #64748b;
-  --color-muted-dark: #94a3b8;
+  --color-muted-dark: #8890a4;
   --color-border: #e2e8f0;
-  --color-border-dark: #334155;
+  --color-border-dark: #1e2030;
   --color-danger: #ef4444;
   --color-success: #22c55e;
 }
 
 body {
-  @apply m-0 font-sans antialiased;
+  @apply m-0 font-sans antialiased bg-surface text-text;
+}
+
+.dark body,
+body.dark {
+  @apply bg-surface-dark text-text-dark;
+}
+
+button, [role="button"], a, select, label, summary,
+input[type="checkbox"], input[type="radio"], input[type="range"],
+[tabindex]:not([tabindex="-1"]) {
+  cursor: pointer;
 }
 
 .dark {
   color-scheme: dark;
+}
+
+/* Horizontal scrolling rows - Netflix-style */
+.media-scroll {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 0.5rem;
+}
+.media-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Smooth hover scale for cards */
+.media-card-wrapper {
+  flex-shrink: 0;
+  width: 200px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@media (min-width: 640px) { .media-card-wrapper { width: 220px; } }
+@media (min-width: 1024px) { .media-card-wrapper { width: 240px; } }
+.media-card-wrapper:hover {
+  transform: scale(1.08);
+  z-index: 10;
 }

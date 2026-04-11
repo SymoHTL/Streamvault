@@ -18,5 +18,6 @@ public class MediaFile : BaseEntity
     public Episode? Episode { get; set; }
 
     public ICollection<Subtitle> Subtitles { get; set; } = [];
+    public ICollection<AudioTrack> AudioTracks { get; set; } = [];
     public ICollection<WatchProgress> WatchProgresses { get; set; } = [];
 }

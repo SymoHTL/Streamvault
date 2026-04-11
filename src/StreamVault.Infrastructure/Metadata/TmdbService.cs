@@ -130,8 +130,9 @@ public class TmdbService : ITmdbService
                 if (!string.IsNullOrEmpty(movie.ImdbId))
                     SetExternalId(db, mediaItem, ExternalIdProvider.Imdb, movie.ImdbId);
 
-                // Genres
-                mediaItem.MediaGenres.Clear();
+                // Genres - remove existing and save before adding new to avoid tracking conflicts
+                db.MediaGenres.RemoveRange(mediaItem.MediaGenres);
+                await db.SaveChangesAsync(ct);
                 foreach (var genre in movie.Genres)
                 {
                     var dbGenre = await GetOrCreateGenreAsync(db, genre.Name, ct);
@@ -143,6 +144,41 @@ public class TmdbService : ITmdbService
                     await SaveImageAsync(db, mediaItem, ImageType.Poster, $"https://image.tmdb.org/t/p/w500{movie.PosterPath}", ct);
                 if (!string.IsNullOrEmpty(movie.BackdropPath))
                     await SaveImageAsync(db, mediaItem, ImageType.Backdrop, $"https://image.tmdb.org/t/p/w1280{movie.BackdropPath}", ct);
+
+                // TMDB Collection - auto-create collection if movie belongs to one
+                if (movie.BelongsToCollection != null)
+                {
+                    var tmdbCollId = movie.BelongsToCollection.Id;
+                    var collection = await db.Collections
+                        .Include(c => c.Items)
+                        .FirstOrDefaultAsync(c => c.TmdbCollectionId == tmdbCollId, ct);
+
+                    if (collection == null)
+                    {
+                        collection = new Collection
+                        {
+                            Name = movie.BelongsToCollection.Name ?? "Unknown Collection",
+                            TmdbCollectionId = tmdbCollId,
+                            PosterUrl = movie.BelongsToCollection.PosterPath != null
+                                ? $"https://image.tmdb.org/t/p/w500{movie.BelongsToCollection.PosterPath}" : null,
+                            BackdropUrl = movie.BelongsToCollection.BackdropPath != null
+                                ? $"https://image.tmdb.org/t/p/w1280{movie.BelongsToCollection.BackdropPath}" : null,
+                        };
+                        db.Collections.Add(collection);
+                        await db.SaveChangesAsync(ct);
+                    }
+
+                    if (!collection.Items.Any(ci => ci.MediaItemId == mediaItem.Id))
+                    {
+                        var maxOrder = collection.Items.Any() ? collection.Items.Max(ci => ci.SortOrder) : 0;
+                        db.CollectionItems.Add(new CollectionItem
+                        {
+                            CollectionId = collection.Id,
+                            MediaItemId = mediaItem.Id,
+                            SortOrder = maxOrder + 1
+                        });
+                    }
+                }
             }
             else
             {
@@ -157,7 +193,9 @@ public class TmdbService : ITmdbService
 
                 SetExternalId(db, mediaItem, ExternalIdProvider.Tmdb, tmdbId.ToString());
 
-                mediaItem.MediaGenres.Clear();
+                // Genres - remove existing and save before adding new to avoid tracking conflicts
+                db.MediaGenres.RemoveRange(mediaItem.MediaGenres);
+                await db.SaveChangesAsync(ct);
                 foreach (var genre in show.Genres)
                 {
                     var dbGenre = await GetOrCreateGenreAsync(db, genre.Name, ct);
@@ -168,6 +206,37 @@ public class TmdbService : ITmdbService
                     await SaveImageAsync(db, mediaItem, ImageType.Poster, $"https://image.tmdb.org/t/p/w500{show.PosterPath}", ct);
                 if (!string.IsNullOrEmpty(show.BackdropPath))
                     await SaveImageAsync(db, mediaItem, ImageType.Backdrop, $"https://image.tmdb.org/t/p/w1280{show.BackdropPath}", ct);
+
+                // Fetch episode details for each season
+                var seasons = await db.Seasons
+                    .Include(s => s.Episodes)
+                    .Where(s => s.MediaItemId == mediaItem.Id)
+                    .ToListAsync(ct);
+
+                foreach (var season in seasons)
+                {
+                    try
+                    {
+                        var tmdbSeason = await client.GetTvSeasonAsync(tmdbId, season.SeasonNumber, TMDbLib.Objects.TvShows.TvSeasonMethods.Undefined, _settings.Language, cancellationToken: ct);
+                        if (tmdbSeason == null) continue;
+
+                        season.Name = tmdbSeason.Name ?? $"Season {season.SeasonNumber}";
+
+                        foreach (var episode in season.Episodes)
+                        {
+                            var tmdbEp = tmdbSeason.Episodes?.FirstOrDefault(e => e.EpisodeNumber == episode.EpisodeNumber);
+                            if (tmdbEp == null) continue;
+
+                            episode.Title = tmdbEp.Name ?? episode.Title;
+                            episode.Overview = tmdbEp.Overview;
+                            episode.RuntimeMinutes = tmdbEp.Runtime > 0 ? (int?)tmdbEp.Runtime : null;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to fetch TMDB season {Season} for show {TmdbId}", season.SeasonNumber, tmdbId);
+                    }
+                }
             }
 
             await db.SaveChangesAsync(ct);

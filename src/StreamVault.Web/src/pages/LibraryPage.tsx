@@ -66,7 +66,13 @@ export default function LibraryPage() {
         </select>
       </div>
 
-      {isLoading && <div className="text-muted dark:text-muted-dark">Loading...</div>}
+      {isLoading && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 animate-pulse">
+          {[...Array(12)].map((_, i) => (
+            <div key={i} className="aspect-[2/3] rounded-lg bg-surface-secondary dark:bg-surface-secondary-dark" />
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
         {data?.items.map((item) => (

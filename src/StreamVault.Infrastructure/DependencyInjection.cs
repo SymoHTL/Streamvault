@@ -28,9 +28,6 @@ public static class DependencyInjection
         services.AddDbContextFactory<StreamVaultDbContext>(options =>
             options.UseSqlite($"Data Source={dbPath}"));
 
-        services.AddDbContext<StreamVaultDbContext>(options =>
-            options.UseSqlite($"Data Source={dbPath}"));
-
         // Services
         services.AddSingleton<IS3StorageService, S3StorageService>();
         services.AddScoped<ILibraryScanner, LibraryScannerService>();

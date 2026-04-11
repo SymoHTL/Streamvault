@@ -24,4 +24,6 @@ public class MediaItem : BaseEntity
     public ICollection<ExternalId> ExternalIds { get; set; } = [];
     public ICollection<MediaImage> Images { get; set; } = [];
     public ICollection<WatchlistItem> WatchlistItems { get; set; } = [];
+    public ICollection<UserMediaList> UserMediaLists { get; set; } = [];
+    public ICollection<CollectionItem> CollectionItems { get; set; } = [];
 }

@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using StreamVault.Core.Configuration;
 using StreamVault.Core.Interfaces;
 using StreamVault.Infrastructure.Data;
 
@@ -13,12 +16,19 @@ public class StreamController : BaseController
     private readonly StreamVaultDbContext _db;
     private readonly IS3StorageService _s3;
     private readonly ITranscodeService _transcode;
+    private readonly IMediaProbeService _probe;
+    private readonly string _ffmpegPath;
+    private readonly ILogger<StreamController> _logger;
 
-    public StreamController(StreamVaultDbContext db, IS3StorageService s3, ITranscodeService transcode)
+    public StreamController(StreamVaultDbContext db, IS3StorageService s3, ITranscodeService transcode,
+        IMediaProbeService probe, IOptions<StreamVaultSettings> settings, ILogger<StreamController> logger)
     {
         _db = db;
         _s3 = s3;
         _transcode = transcode;
+        _probe = probe;
+        _ffmpegPath = settings.Value.Transcoding.FfmpegPath;
+        _logger = logger;
     }
 
     [HttpGet("{mediaFileId:guid}/direct")]
@@ -35,7 +45,278 @@ public class StreamController : BaseController
         if (library == null) return NotFound();
 
         var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromMinutes(55));
-        return Ok(new { url });
+        return Ok(new
+        {
+            url,
+            container = mediaFile.Container,
+            durationSeconds = mediaFile.DurationSeconds,
+            videoCodec = mediaFile.VideoCodec,
+            audioCodec = mediaFile.AudioCodec,
+            resolution = mediaFile.Resolution
+        });
+    }
+
+    /// <summary>
+    /// Returns available audio tracks for a media file.
+    /// Checks DB cache first, probes the file via ffprobe if not cached.
+    /// </summary>
+    [HttpGet("{mediaFileId:guid}/audio-tracks")]
+    public async Task<IActionResult> GetAudioTracks(Guid mediaFileId)
+    {
+        var mediaFile = await _db.MediaFiles
+            .Include(mf => mf.AudioTracks)
+            .Include(mf => mf.Episode).ThenInclude(e => e!.Season).ThenInclude(s => s.MediaItem).ThenInclude(mi => mi.Library)
+            .Include(mf => mf.MediaItem).ThenInclude(mi => mi!.Library)
+            .FirstOrDefaultAsync(mf => mf.Id == mediaFileId);
+
+        if (mediaFile == null) return NotFound();
+
+        // Return cached tracks if available
+        if (mediaFile.AudioTracks.Count > 0)
+        {
+            return Ok(mediaFile.AudioTracks
+                .OrderBy(at => at.StreamIndex)
+                .Select(at => new { at.StreamIndex, at.Language, at.Title, at.Codec, at.Channels })
+                .ToList());
+        }
+
+        // Probe the file to discover audio tracks
+        var library = mediaFile.MediaItem?.Library ?? mediaFile.Episode?.Season.MediaItem.Library;
+        if (library == null) return NotFound();
+
+        try
+        {
+            var presignedUrl = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromMinutes(5));
+            var probeResult = await _probe.ProbeAsync(presignedUrl);
+
+            foreach (var track in probeResult.AudioTracks)
+            {
+                var audioTrack = new Core.Entities.AudioTrack
+                {
+                    StreamIndex = track.StreamIndex,
+                    Language = track.Language,
+                    Title = track.Title,
+                    Codec = track.Codec,
+                    Channels = track.Channels,
+                    MediaFileId = mediaFile.Id
+                };
+                _db.AudioTracks.Add(audioTrack);
+            }
+
+            // Also update file-level codec info if missing
+            if (string.IsNullOrEmpty(mediaFile.VideoCodec) && probeResult.VideoCodec != null)
+                mediaFile.VideoCodec = probeResult.VideoCodec;
+            if (string.IsNullOrEmpty(mediaFile.AudioCodec) && probeResult.AudioCodec != null)
+                mediaFile.AudioCodec = probeResult.AudioCodec;
+            if (string.IsNullOrEmpty(mediaFile.Resolution) && probeResult.Resolution != null)
+                mediaFile.Resolution = probeResult.Resolution;
+            if (mediaFile.DurationSeconds == null && probeResult.DurationSeconds != null)
+                mediaFile.DurationSeconds = probeResult.DurationSeconds;
+
+            await _db.SaveChangesAsync();
+
+            return Ok(probeResult.AudioTracks.Select(at => new { at.StreamIndex, at.Language, at.Title, at.Codec, at.Channels }).ToList());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to probe audio tracks for media file {MediaFileId}", mediaFileId);
+            return Ok(Array.Empty<object>());
+        }
+    }
+
+    /// <summary>
+    /// Proxy streaming endpoint with proper Range request support for seeking.
+    /// The browser sends Range headers and this endpoint proxies them to S3.
+    /// </summary>
+    [HttpGet("{mediaFileId:guid}/proxy")]
+    public async Task<IActionResult> ProxyStream(Guid mediaFileId)
+    {
+        var mediaFile = await _db.MediaFiles
+            .Include(mf => mf.Episode).ThenInclude(e => e!.Season).ThenInclude(s => s.MediaItem).ThenInclude(mi => mi.Library)
+            .Include(mf => mf.MediaItem).ThenInclude(mi => mi!.Library)
+            .FirstOrDefaultAsync(mf => mf.Id == mediaFileId);
+
+        if (mediaFile == null) return NotFound();
+
+        var library = mediaFile.MediaItem?.Library ?? mediaFile.Episode?.Season.MediaItem.Library;
+        if (library == null) return NotFound();
+
+        var meta = await _s3.HeadObjectAsync(library.S3ConnectionId, mediaFile.S3Key);
+        var totalLength = meta.ContentLength;
+
+        var contentType = mediaFile.Container.ToLowerInvariant() switch
+        {
+            "mp4" or "m4v" => "video/mp4",
+            "mkv" => "video/x-matroska",
+            "webm" => "video/webm",
+            "avi" => "video/x-msvideo",
+            "mov" => "video/quicktime",
+            _ => "video/mp4"
+        };
+
+        var rangeHeader = Request.Headers.Range.FirstOrDefault();
+        if (!string.IsNullOrEmpty(rangeHeader))
+        {
+            // Parse Range: bytes=start-end
+            var rangeStr = rangeHeader.Replace("bytes=", "");
+            var parts = rangeStr.Split('-');
+            var start = long.Parse(parts[0]);
+            var end = parts.Length > 1 && !string.IsNullOrEmpty(parts[1])
+                ? long.Parse(parts[1])
+                : totalLength - 1;
+
+            if (start >= totalLength)
+                return StatusCode(416); // Range Not Satisfiable
+
+            end = Math.Min(end, totalLength - 1);
+            var chunkSize = end - start + 1;
+
+            await using var stream = await _s3.GetObjectStreamAsync(library.S3ConnectionId, mediaFile.S3Key, rangeHeader);
+
+            // Write directly to response to avoid FileStreamResult overriding the 206 status
+            Response.StatusCode = 206;
+            Response.Headers.Append("Content-Range", $"bytes {start}-{end}/{totalLength}");
+            Response.Headers.Append("Accept-Ranges", "bytes");
+            Response.ContentType = contentType;
+            Response.ContentLength = chunkSize;
+
+            await stream.CopyToAsync(Response.Body);
+            return new EmptyResult();
+        }
+
+        // No range requested - return full file with Accept-Ranges header
+        await using var fullStream = await _s3.GetObjectStreamAsync(library.S3ConnectionId, mediaFile.S3Key);
+
+        Response.Headers.Append("Accept-Ranges", "bytes");
+        Response.ContentType = contentType;
+        Response.ContentLength = totalLength;
+
+        await fullStream.CopyToAsync(Response.Body);
+        return new EmptyResult();
+    }
+
+    /// <summary>
+    /// Remux streaming endpoint - transcodes audio to AAC (browser-compatible) while copying video.
+    /// Used for MKV files with AC3/DTS audio that browsers can't play natively.
+    /// Outputs fragmented MP4 for browser streaming.
+    /// </summary>
+    [HttpGet("{mediaFileId:guid}/remux")]
+    public async Task<IActionResult> RemuxStream(Guid mediaFileId, [FromQuery] double start = 0, [FromQuery] int? audioTrack = null)
+    {
+        var mediaFile = await _db.MediaFiles
+            .Include(mf => mf.Episode).ThenInclude(e => e!.Season).ThenInclude(s => s.MediaItem).ThenInclude(mi => mi.Library)
+            .Include(mf => mf.MediaItem).ThenInclude(mi => mi!.Library)
+            .FirstOrDefaultAsync(mf => mf.Id == mediaFileId);
+
+        if (mediaFile == null) return NotFound();
+
+        var library = mediaFile.MediaItem?.Library ?? mediaFile.Episode?.Season.MediaItem.Library;
+        if (library == null) return NotFound();
+
+        // Try pre-signed URL for fast input seeking, fall back to stdin pipe
+        string? presignedUrl = null;
+        try
+        {
+            presignedUrl = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromHours(1));
+        }
+        catch
+        {
+            _logger.LogWarning("Failed to get pre-signed URL for {Key}, falling back to pipe", mediaFile.S3Key);
+        }
+
+        var mapArgs = audioTrack.HasValue
+            ? $"-map 0:v:0 -map 0:a:{audioTrack.Value}"
+            : "";
+
+        string args;
+        bool usePipe;
+
+        if (presignedUrl != null)
+        {
+            // Pre-signed URL: -ss before -i for fast keyframe-accurate seeking
+            var seekArgs = start > 0 ? $"-ss {start:F2}" : "";
+            args = $"{seekArgs} -i \"{presignedUrl}\" {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
+            usePipe = false;
+        }
+        else
+        {
+            // Pipe: -ss after -i (output seeking, slower)
+            var seekArgs = start > 0 ? $"-ss {start:F2}" : "";
+            args = $"-i pipe:0 {seekArgs} {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
+            usePipe = true;
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = _ffmpegPath,
+            Arguments = args,
+            RedirectStandardInput = usePipe,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        var process = Process.Start(psi);
+        if (process == null)
+        {
+            _logger.LogError("Failed to start ffmpeg process");
+            return StatusCode(500, "Failed to start transcoding");
+        }
+
+        // Log ffmpeg stderr in background (for diagnostics)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var stderr = await process.StandardError.ReadToEndAsync();
+                if (!string.IsNullOrWhiteSpace(stderr))
+                    _logger.LogWarning("ffmpeg remux stderr: {Stderr}", stderr[..Math.Min(stderr.Length, 2000)]);
+            }
+            catch { /* ignore */ }
+        });
+
+        Response.StatusCode = 200;
+        Response.ContentType = "video/mp4";
+        Response.Headers.Append("Accept-Ranges", "none");
+
+        // Pipe S3 stream to ffmpeg stdin if using pipe mode
+        if (usePipe)
+        {
+            var s3Stream = await _s3.GetObjectStreamAsync(library.S3ConnectionId, mediaFile.S3Key);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await s3Stream.CopyToAsync(process.StandardInput.BaseStream);
+                    process.StandardInput.BaseStream.Close();
+                }
+                catch { /* S3 or ffmpeg stdin closed */ }
+                finally
+                {
+                    await s3Stream.DisposeAsync();
+                }
+            });
+        }
+
+        try
+        {
+            await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, HttpContext.RequestAborted);
+        }
+        catch (OperationCanceledException)
+        {
+            // Client disconnected
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+            }
+            process.Dispose();
+        }
+
+        return new EmptyResult();
     }
 
     [HttpGet("{mediaFileId:guid}/transcode/{profileName}")]

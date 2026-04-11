@@ -30,6 +30,22 @@ public class ProgressController : BaseController
         return Ok(progress);
     }
 
+    [HttpGet("{mediaFileId:guid}")]
+    public async Task<ActionResult<WatchProgressResponse>> Get(Guid mediaFileId)
+    {
+        var userId = GetUserId();
+        var progress = await _db.WatchProgresses
+            .Where(wp => wp.UserId == userId && wp.MediaFileId == mediaFileId)
+            .Include(wp => wp.MediaFile)
+            .Select(wp => new WatchProgressResponse(
+                wp.MediaFileId, wp.PositionTicks, wp.Completed, wp.LastWatchedAt, wp.MediaFile.DurationSeconds
+            ))
+            .FirstOrDefaultAsync();
+
+        if (progress == null) return NotFound();
+        return Ok(progress);
+    }
+
     [HttpPut("{mediaFileId:guid}")]
     public async Task<IActionResult> Update(Guid mediaFileId, [FromBody] UpdateProgressRequest request)
     {

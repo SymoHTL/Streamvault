@@ -110,7 +110,9 @@ public static partial class NamingConventionParser
             var seasonMatch = SeasonFolderRegex().Match(parts[i]);
             if (seasonMatch.Success)
             {
-                seasonNumber = int.Parse(seasonMatch.Groups["num"].Value);
+                seasonNumber = seasonMatch.Groups["num"].Success
+                    ? int.Parse(seasonMatch.Groups["num"].Value)
+                    : 0; // "Specials" folder = Season 0
             }
             else if (showTitle == null)
             {
@@ -129,8 +131,24 @@ public static partial class NamingConventionParser
         }
 
         // Parse episode info from filename
-        var epMatch = EpisodeRegex().Match(Path.GetFileNameWithoutExtension(fileName));
-        if (!epMatch.Success) return null;
+        var fileNameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+        var epMatch = EpisodeRegex().Match(fileNameWithoutExt);
+        if (!epMatch.Success)
+        {
+            // Fallback: try simpler pattern for files that only have SxxExx without quality tags
+            var simpleMatch = SimpleEpisodeRegex().Match(fileNameWithoutExt);
+            if (!simpleMatch.Success) return null;
+
+            var sSeason = int.Parse(simpleMatch.Groups["season"].Value);
+            var sEpisode = int.Parse(simpleMatch.Groups["episode"].Value);
+            seasonNumber ??= sSeason;
+
+            showTitle ??= simpleMatch.Groups["title"].Success
+                ? simpleMatch.Groups["title"].Value.Replace('.', ' ').Replace('_', ' ').Trim()
+                : "Unknown Show";
+
+            return new TvShowParseResult(showTitle, showYear, seasonNumber.Value, sEpisode, null, s3Key);
+        }
 
         var season = int.Parse(epMatch.Groups["season"].Value);
         var episode = int.Parse(epMatch.Groups["episode"].Value);
@@ -140,7 +158,9 @@ public static partial class NamingConventionParser
         string? episodeTitle = null;
         if (epMatch.Groups["eptitle"].Success)
         {
-            episodeTitle = epMatch.Groups["eptitle"].Value.Replace('.', ' ').Replace('_', ' ').Trim(' ', '-');
+            var rawTitle = epMatch.Groups["eptitle"].Value.Replace('.', ' ').Replace('_', ' ').Trim(' ', '-');
+            if (!string.IsNullOrWhiteSpace(rawTitle) && !IsOnlyQualityTags(rawTitle))
+                episodeTitle = rawTitle;
         }
 
         showTitle ??= epMatch.Groups["title"].Success
@@ -183,6 +203,21 @@ public static partial class NamingConventionParser
         return cleaned.Replace('.', ' ').Replace('_', ' ').Trim();
     }
 
+    private static readonly HashSet<string> QualityTagWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "720p", "1080p", "2160p", "4K", "HDTV", "WEB", "WEBDL", "WEBRip", "BluRay", "BDRip", "DVDRip",
+        "x264", "x265", "HEVC", "H264", "H265", "AAC", "EAC3", "AC3", "DTS", "FLAC", "ATMOS",
+        "REMUX", "PROPER", "REPACK", "German", "FRENCH", "SPANISH", "ITALIAN", "MULTI", "MULTi",
+        "DL", "DUAL", "DUBBED", "iNTERNAL", "SUBBED", "NF", "AMZN", "DSNP", "ATVP", "HMAX",
+        "REMASTERED", "EXTENDED", "UNCUT", "DD5", "DDP5"
+    };
+
+    private static bool IsOnlyQualityTags(string text)
+    {
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return words.Length > 0 && words.All(w => QualityTagWords.Contains(w));
+    }
+
     // Radarr folder: "Movie Title (2024)" or "Movie Title (2024) [tags]"
     [GeneratedRegex(@"^(?<title>.+?)\s*\((?<year>\d{4})\)")]
     private static partial Regex MovieFolderRegex();
@@ -192,19 +227,25 @@ public static partial class NamingConventionParser
     private static partial Regex MovieFileRegex();
 
     // Season folder: "Season 01", "Season 1", "S01", "Specials"
-    [GeneratedRegex(@"^(?:Season\s*|S)(?<num>\d+)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:Season\s*|S)(?<num>\d+)$|^Specials$", RegexOptions.IgnoreCase)]
     private static partial Regex SeasonFolderRegex();
 
     // Episode: "Show.Title.S01E01.Episode.Title.720p" or "Show Title - S01E01 - Episode Title"
-    [GeneratedRegex(@"^(?<title>.+?)[\.\s\-]*S(?<season>\d+)E(?<episode>\d+)[\.\s\-]*(?<eptitle>[^\.]*?)(?=[\.\s]*(?:\d{3,4}p|HDTV|WEB|BluRay|x264|x265|HEVC|AAC|$))", RegexOptions.IgnoreCase)]
+    // Uses .*? (not [^\.]*?) so dot-separated episode titles are captured correctly
+    // Tags require a preceding separator (dot/space) to avoid matching inside words (e.g. "Anfang" matching "NF")
+    [GeneratedRegex(@"^(?<title>.+?)[\.\s\-]*S(?<season>\d+)E(?<episode>\d+)[\.\s\-]*(?<eptitle>.*?)(?=(?:[\.\s\-]+(?:\d{3,4}p|HDTV|WEB[-.]?DL|WEB[-.]?Rip|WEB|BluRay|BDRip|DVDRip|x264|x265|HEVC|H\.?264|H\.?265|AAC|EAC3|E-AC-?3|AC3|DD[P+]?5|DTS|FLAC|ATMOS|REMUX|PROPER|REPACK|German|FRENCH|SPANISH|ITALIAN|MULTI|MULTi|DL|DUAL|DUBBED|iNTERNAL|SUBBED|NF|AMZN|DSNP|ATVP|HMAX|REMASTERED|EXTENDED|UNCUT))|$)", RegexOptions.IgnoreCase)]
     private static partial Regex EpisodeRegex();
+
+    // Simple fallback: just match SxxExx anywhere in the filename
+    [GeneratedRegex(@"^(?<title>.+?)[\.\s\-]*S(?<season>\d+)E(?<episode>\d+)", RegexOptions.IgnoreCase)]
+    private static partial Regex SimpleEpisodeRegex();
 
     // Subtitle language: "name.en.srt", "name.eng.forced.srt"
     [GeneratedRegex(@"\.(?<lang>[a-z]{2,3})(?:\.(?<forced>forced))?$", RegexOptions.IgnoreCase)]
     private static partial Regex SubtitleLangRegex();
 
     // Quality tags to strip
-    [GeneratedRegex(@"[\.\s](?:720p|1080p|2160p|4K|HDTV|WEB-?DL|WEB-?Rip|BluRay|BDRip|DVDRip|x264|x265|HEVC|H\.?264|H\.?265|AAC|DTS|FLAC|REMUX|PROPER|REPACK).*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"[\.\s](?:720p|1080p|2160p|4K|HDTV|WEB-?DL|WEB-?Rip|BluRay|BDRip|DVDRip|x264|x265|HEVC|H\.?264|H\.?265|AAC|EAC3|E-AC-?3|AC3|DD[P+]?5|DTS|FLAC|ATMOS|REMUX|PROPER|REPACK|German|FRENCH|SPANISH|ITALIAN|MULTI|MULTi|DL|DUAL|DUBBED|iNTERNAL|SUBBED|NF|AMZN|DSNP|ATVP|HMAX|REMASTERED|EXTENDED|UNCUT).*$", RegexOptions.IgnoreCase)]
     private static partial Regex QualityTagRegex();
 }
 

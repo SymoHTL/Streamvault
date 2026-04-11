@@ -27,6 +27,7 @@ public class MediaController : BaseController
         var userId = GetUserId();
         var item = await _db.MediaItems
             .Include(m => m.MediaFiles).ThenInclude(mf => mf.Subtitles)
+            .Include(m => m.MediaFiles).ThenInclude(mf => mf.AudioTracks)
             .Include(m => m.MediaGenres).ThenInclude(mg => mg.Genre)
             .Include(m => m.MediaPersons).ThenInclude(mp => mp.Person)
             .Include(m => m.Images)
@@ -44,11 +45,12 @@ public class MediaController : BaseController
             item.MediaGenres.Select(mg => mg.Genre.Name).ToList(),
             item.MediaFiles.Select(mf => new MediaFileResponse(
                 mf.Id, mf.S3Key, mf.Container, mf.VideoCodec, mf.AudioCodec, mf.Resolution, mf.DurationSeconds,
-                mf.Subtitles.Select(s => new SubtitleResponse(s.Id, s.Language, s.Format.ToString(), s.IsExternal, s.IsForced)).ToList()
+                mf.Subtitles.Select(s => new SubtitleResponse(s.Id, s.Language, s.Format.ToString(), s.IsExternal, s.IsForced)).ToList(),
+                mf.AudioTracks.OrderBy(at => at.StreamIndex).Select(at => new AudioTrackResponse(at.StreamIndex, at.Language, at.Title, at.Codec, at.Channels)).ToList()
             )).ToList(),
             item.Images.Select(i => new MediaImageResponse(i.Id, i.Type.ToString(), i.SourceUrl ?? $"/api/images/{i.Id}")).ToList(),
             item.MediaPersons.OrderBy(mp => mp.Order).Select(mp => new PersonResponse(
-                mp.PersonId, mp.Person.Name, mp.Role.ToString(), mp.Character, mp.Order
+                mp.PersonId, mp.Person.Name, mp.Role.ToString(), mp.Character, mp.Order, mp.Person.ImageUrl
             )).ToList(),
             item.ExternalIds.Select(e => new ExternalIdResponse(e.Provider.ToString(), e.ExternalKey)).ToList(),
             isInWatchlist
@@ -61,6 +63,7 @@ public class MediaController : BaseController
         var userId = GetUserId();
         var item = await _db.MediaItems
             .Include(m => m.Seasons).ThenInclude(s => s.Episodes).ThenInclude(e => e.MediaFiles).ThenInclude(mf => mf.Subtitles)
+            .Include(m => m.Seasons).ThenInclude(s => s.Episodes).ThenInclude(e => e.MediaFiles).ThenInclude(mf => mf.AudioTracks)
             .Include(m => m.MediaGenres).ThenInclude(mg => mg.Genre)
             .Include(m => m.MediaPersons).ThenInclude(mp => mp.Person)
             .Include(m => m.Images)
@@ -92,14 +95,15 @@ public class MediaController : BaseController
                         e.MediaFiles.Select(mf2 => new MediaFileResponse(
                             mf2.Id, mf2.S3Key, mf2.Container, mf2.VideoCodec, mf2.AudioCodec,
                             mf2.Resolution, mf2.DurationSeconds,
-                            mf2.Subtitles.Select(sub => new SubtitleResponse(sub.Id, sub.Language, sub.Format.ToString(), sub.IsExternal, sub.IsForced)).ToList()
+                            mf2.Subtitles.Select(sub => new SubtitleResponse(sub.Id, sub.Language, sub.Format.ToString(), sub.IsExternal, sub.IsForced)).ToList(),
+                            mf2.AudioTracks.OrderBy(at => at.StreamIndex).Select(at => new AudioTrackResponse(at.StreamIndex, at.Language, at.Title, at.Codec, at.Channels)).ToList()
                         )).ToList(),
                         progress != null ? new WatchProgressResponse(progress.MediaFileId, progress.PositionTicks, progress.Completed, progress.LastWatchedAt, mf?.DurationSeconds) : null
                     );
                 }).ToList()
             )).ToList(),
             item.MediaPersons.OrderBy(mp => mp.Order).Select(mp => new PersonResponse(
-                mp.PersonId, mp.Person.Name, mp.Role.ToString(), mp.Character, mp.Order
+                mp.PersonId, mp.Person.Name, mp.Role.ToString(), mp.Character, mp.Order, mp.Person.ImageUrl
             )).ToList(),
             isInWatchlist
         ));
@@ -128,7 +132,7 @@ public class MediaController : BaseController
 
         var movies = await _db.MediaItems
             .Include(m => m.Images)
-            .Where(m => m.MediaType == MediaType.Movie && m.Title.Contains(q))
+            .Where(m => m.MediaType == MediaType.Movie && EF.Functions.Like(m.Title, $"%{q}%"))
             .Take(limit)
             .Select(m => new MediaItemSummaryResponse(
                 m.Id, m.Title, m.Year, m.CommunityRating, m.MediaType.ToString(),
@@ -139,7 +143,7 @@ public class MediaController : BaseController
 
         var tvShows = await _db.MediaItems
             .Include(m => m.Images)
-            .Where(m => m.MediaType == MediaType.TvShow && m.Title.Contains(q))
+            .Where(m => m.MediaType == MediaType.TvShow && EF.Functions.Like(m.Title, $"%{q}%"))
             .Take(limit)
             .Select(m => new MediaItemSummaryResponse(
                 m.Id, m.Title, m.Year, m.CommunityRating, m.MediaType.ToString(),

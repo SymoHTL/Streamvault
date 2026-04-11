@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StreamVault.Core.DTOs;
 using StreamVault.Core.Entities;
 using StreamVault.Core.Interfaces;
 using StreamVault.Infrastructure.Data;
+using StreamVault.Infrastructure.S3;
 
 namespace StreamVault.Api.Controllers;
 
@@ -15,12 +17,14 @@ public class AdminController : BaseController
     private readonly StreamVaultDbContext _db;
     private readonly IS3StorageService _s3;
     private readonly ITranscodeService _transcode;
+    private readonly IDataProtector _protector;
 
-    public AdminController(StreamVaultDbContext db, IS3StorageService s3, ITranscodeService transcode)
+    public AdminController(StreamVaultDbContext db, IS3StorageService s3, ITranscodeService transcode, IDataProtectionProvider protectionProvider)
     {
         _db = db;
         _s3 = s3;
         _transcode = transcode;
+        _protector = protectionProvider.CreateProtector("S3Credentials");
     }
 
     [HttpGet("dashboard")]
@@ -69,7 +73,7 @@ public class AdminController : BaseController
             Endpoint = request.Endpoint,
             Bucket = request.Bucket,
             AccessKey = request.AccessKey,
-            SecretKeyEncrypted = request.SecretKey, // Will be encrypted by S3StorageService on first use
+            SecretKeyEncrypted = _protector.Protect(request.SecretKey),
             Region = request.Region,
             ForcePathStyle = request.ForcePathStyle
         };
@@ -96,9 +100,13 @@ public class AdminController : BaseController
         connection.ForcePathStyle = request.ForcePathStyle;
 
         if (!string.IsNullOrEmpty(request.SecretKey))
-            connection.SecretKeyEncrypted = request.SecretKey;
+            connection.SecretKeyEncrypted = _protector.Protect(request.SecretKey);
 
         await _db.SaveChangesAsync();
+
+        // Invalidate the cached S3 client so it picks up the new credentials
+        if (_s3 is S3StorageService s3Service)
+            s3Service.InvalidateClient(id);
 
         return Ok(new S3ConnectionResponse(connection.Id, connection.Name, connection.Endpoint,
             connection.Bucket, connection.Region, connection.ForcePathStyle, connection.CreatedAt));
@@ -115,6 +123,10 @@ public class AdminController : BaseController
 
         _db.S3Connections.Remove(connection);
         await _db.SaveChangesAsync();
+
+        if (_s3 is S3StorageService s3Service)
+            s3Service.InvalidateClient(id);
+
         return NoContent();
     }
 

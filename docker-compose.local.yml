@@ -1,0 +1,34 @@
+services:
+  streamvault:
+    build: .
+    container_name: streamvault-local
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data-local:/data
+    environment:
+      - DataDirectory=/data
+      - Redis__ConnectionString=redis:6379
+      - Jwt__Secret=mvRsIkrLe0nFlutjEynz1pvvU9RvVP9xWnBnJGsq9SHbhdWMSEugN8WBzn39
+      - Tmdb__ApiKey=693ef07f905cf6f8fb4146e8b2dbb621
+      - Transcoding__FfmpegPath=/usr/bin/ffmpeg
+      - ASPNETCORE_ENVIRONMENT=Development
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: streamvault-redis-local
+    volumes:
+      - redis-local-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  redis-local-data:

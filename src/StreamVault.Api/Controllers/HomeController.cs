@@ -35,15 +35,51 @@ public class HomeController : BaseController
             .Distinct()
             .ToList();
 
+        // Build a lookup of the latest progress per media item
+        var progressByMediaItemId = continueWatchingProgress
+            .GroupBy(wp => wp.MediaFile.MediaItemId ?? wp.MediaFile.Episode?.Season.MediaItemId)
+            .Where(g => g.Key.HasValue)
+            .ToDictionary(
+                g => g.Key!.Value,
+                g => g.OrderByDescending(wp => wp.LastWatchedAt).First()
+            );
+
         var continueWatchingItems = await _db.MediaItems
             .Include(m => m.Images)
             .Where(m => continueWatchingIds.Contains(m.Id))
-            .Select(m => new MediaItemSummaryResponse(
-                m.Id, m.Title, m.Year, m.CommunityRating, m.MediaType.ToString(),
-                m.Images.Where(i => i.Type == ImageType.Poster).Select(i => i.SourceUrl).FirstOrDefault(),
-                m.AddedAt, null
-            ))
             .ToListAsync();
+
+        // Preserve order from progress query and include progress data
+        var continueWatching = continueWatchingIds
+            .Where(id => continueWatchingItems.Any(m => m.Id == id))
+            .Select(id =>
+            {
+                var m = continueWatchingItems.First(mi => mi.Id == id);
+                var wp = progressByMediaItemId.GetValueOrDefault(id);
+                ContinueWatchingEpisodeInfo? episodeInfo = null;
+                if (wp?.MediaFile.Episode != null)
+                {
+                    var ep = wp.MediaFile.Episode;
+                    episodeInfo = new ContinueWatchingEpisodeInfo(
+                        ep.Season.SeasonNumber,
+                        ep.EpisodeNumber,
+                        ep.Title,
+                        wp.MediaFileId
+                    );
+                }
+                else if (wp != null)
+                {
+                    episodeInfo = new ContinueWatchingEpisodeInfo(0, 0, "", wp.MediaFileId);
+                }
+                return new MediaItemSummaryResponse(
+                    m.Id, m.Title, m.Year, m.CommunityRating, m.MediaType.ToString(),
+                    m.Images.Where(i => i.Type == ImageType.Poster).Select(i => i.SourceUrl).FirstOrDefault(),
+                    m.AddedAt,
+                    wp != null ? new WatchProgressResponse(wp.MediaFileId, wp.PositionTicks, wp.Completed, wp.LastWatchedAt, wp.MediaFile.DurationSeconds) : null,
+                    episodeInfo
+                );
+            })
+            .ToList();
 
         // Recently added
         var recentlyAdded = await _db.MediaItems
@@ -101,6 +137,6 @@ public class HomeController : BaseController
                 .FirstOrDefaultAsync();
         }
 
-        return Ok(new HomeResponse(continueWatchingItems, recentlyAdded, recentlyWatchedItems, featured));
+        return Ok(new HomeResponse(continueWatching, recentlyAdded, recentlyWatchedItems, featured));
     }
 }

@@ -128,7 +128,7 @@ public class LibrariesController : BaseController
             .Where(m => m.LibraryId == id);
 
         if (!string.IsNullOrEmpty(search))
-            query = query.Where(m => m.Title.Contains(search));
+            query = query.Where(m => EF.Functions.Like(m.Title, $"%{search}%"));
         if (!string.IsNullOrEmpty(genre))
             query = query.Where(m => m.MediaGenres.Any(mg => mg.Genre.Name == genre));
         if (year.HasValue)

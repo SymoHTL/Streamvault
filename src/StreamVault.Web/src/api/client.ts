@@ -12,6 +12,12 @@ import type {
   S3ConnectionResponse,
   UserResponse,
   WatchlistResponse,
+  UserMediaListDetailResponse,
+  UserMediaListResponse,
+  CollectionResponse,
+  CollectionDetailResponse,
+  AudioTrackInfo,
+  WatchProgressResponse,
 } from '../types';
 
 const BASE = '';
@@ -32,7 +38,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       headers['Authorization'] = `Bearer ${localStorage.getItem('accessToken')}`;
       const retry = await fetch(`${BASE}${path}`, { ...options, headers });
       if (!retry.ok) throw new ApiError(retry.status, await retry.text());
-      return retry.status === 204 ? (undefined as T) : retry.json();
+      return hasNoBody(retry) ? (undefined as T) : retry.json();
     }
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
@@ -41,7 +47,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) throw new ApiError(res.status, await res.text());
-  return res.status === 204 ? (undefined as T) : res.json();
+  return hasNoBody(res) ? (undefined as T) : res.json();
+}
+
+function hasNoBody(res: Response): boolean {
+  if (res.status === 204 || res.status === 201 || res.status === 202) {
+    const ct = res.headers.get('content-type');
+    if (!ct || !ct.includes('application/json')) return true;
+  }
+  return false;
 }
 
 async function tryRefreshToken(): Promise<boolean> {
@@ -116,11 +130,22 @@ export const api = {
   },
 
   stream: {
-    getDirectUrl: (mediaFileId: string) => request<{ url: string }>(`/api/stream/${mediaFileId}/direct`),
+    getDirectUrl: (mediaFileId: string) => request<{ url: string; container: string; durationSeconds: number | null; videoCodec: string | null; audioCodec: string | null; resolution: string | null }>(`/api/stream/${mediaFileId}/direct`),
+    proxyUrl: (mediaFileId: string) => `/api/stream/${mediaFileId}/proxy`,
+    remuxUrl: (mediaFileId: string, start?: number, audioTrack?: number) => {
+      const params = new URLSearchParams();
+      if (start) params.set('start', String(start));
+      if (audioTrack !== undefined) params.set('audioTrack', String(audioTrack));
+      const qs = params.toString();
+      return `/api/stream/${mediaFileId}/remux${qs ? `?${qs}` : ''}`;
+    },
     subtitleUrl: (mediaFileId: string, subtitleId: string) => `/api/stream/${mediaFileId}/subtitles/${subtitleId}`,
+    audioTracks: (mediaFileId: string) => request<AudioTrackInfo[]>(`/api/stream/${mediaFileId}/audio-tracks`),
   },
 
   progress: {
+    get: (mediaFileId: string) =>
+      request<WatchProgressResponse>(`/api/progress/${mediaFileId}`),
     update: (mediaFileId: string, positionTicks: number, completed: boolean) =>
       request<void>(`/api/progress/${mediaFileId}`, {
         method: 'PUT',
@@ -134,6 +159,33 @@ export const api = {
     list: () => request<WatchlistResponse>('/api/watchlist'),
     add: (mediaItemId: string) => request<void>(`/api/watchlist/${mediaItemId}`, { method: 'POST' }),
     remove: (mediaItemId: string) => request<void>(`/api/watchlist/${mediaItemId}`, { method: 'DELETE' }),
+  },
+
+  lists: {
+    getAll: (status?: string) => request<UserMediaListDetailResponse[]>(`/api/lists${status ? `?status=${status}` : ''}`),
+    get: (mediaItemId: string) => request<UserMediaListResponse>(`/api/lists/${mediaItemId}`),
+    upsert: (mediaItemId: string, status: string, rating?: number | null, notes?: string | null) =>
+      request<UserMediaListResponse>(`/api/lists/${mediaItemId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status, rating, notes }),
+      }),
+    remove: (mediaItemId: string) => request<void>(`/api/lists/${mediaItemId}`, { method: 'DELETE' }),
+    counts: () => request<Record<string, number>>('/api/lists/counts'),
+  },
+
+  collections: {
+    list: () => request<CollectionResponse[]>('/api/collections'),
+    get: (id: string) => request<CollectionDetailResponse>(`/api/collections/${id}`),
+    forMedia: (mediaItemId: string) => request<CollectionResponse[]>(`/api/collections/for-media/${mediaItemId}`),
+    create: (name: string, description?: string) =>
+      request<CollectionResponse>('/api/collections', { method: 'POST', body: JSON.stringify({ name, description }) }),
+    update: (id: string, data: { name?: string; description?: string }) =>
+      request<CollectionResponse>(`/api/collections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) => request<void>(`/api/collections/${id}`, { method: 'DELETE' }),
+    addItem: (id: string, mediaItemId: string) =>
+      request<void>(`/api/collections/${id}/items/${mediaItemId}`, { method: 'POST' }),
+    removeItem: (id: string, mediaItemId: string) =>
+      request<void>(`/api/collections/${id}/items/${mediaItemId}`, { method: 'DELETE' }),
   },
 
   admin: {
