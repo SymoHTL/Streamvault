@@ -74,6 +74,15 @@ public class SetupController : BaseController
         };
         _db.Libraries.Add(library);
 
+        // Create default profile for admin
+        var defaultProfile = new Profile
+        {
+            Name = admin.Username,
+            IsDefault = true,
+            UserId = admin.Id
+        };
+        _db.Profiles.Add(defaultProfile);
+
         await _db.SaveChangesAsync();
 
         // Generate tokens and return auth response
@@ -82,11 +91,15 @@ public class SetupController : BaseController
         _db.RefreshTokens.Add(refreshToken);
         await _db.SaveChangesAsync();
 
+        var profileResponse = new ProfileResponse(defaultProfile.Id, defaultProfile.Name, defaultProfile.AvatarUrl, false, defaultProfile.IsDefault);
+
         return Ok(new AuthResponse(
             accessToken,
             refreshToken.Token,
             DateTime.UtcNow.AddMinutes(15),
-            new UserResponse(admin.Id, admin.Username, admin.Email, admin.Role.ToString(), admin.CreatedAt)
+            new UserResponse(admin.Id, admin.Username, admin.Email, admin.Role.ToString(), admin.CreatedAt),
+            profileResponse,
+            new List<ProfileResponse> { profileResponse }
         ));
     }
 }

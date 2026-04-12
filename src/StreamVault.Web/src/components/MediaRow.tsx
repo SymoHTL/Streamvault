@@ -21,8 +21,8 @@ export default function MediaRow({ title, items, showEpisodeInfo }: Props) {
   };
 
   return (
-    <section className="mb-6 group/row relative">
-      <h2 className="text-lg font-semibold mb-3 text-text dark:text-text-dark">{title}</h2>
+    <section className="mb-6 2xl:mb-10 group/row relative">
+      <h2 className="text-lg 2xl:text-2xl font-semibold mb-3 2xl:mb-5 text-text dark:text-text-dark">{title}</h2>
       <div className="relative">
         {/* Left arrow */}
         <button

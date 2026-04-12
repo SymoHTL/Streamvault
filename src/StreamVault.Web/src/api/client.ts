@@ -18,6 +18,9 @@ import type {
   CollectionDetailResponse,
   AudioTrackInfo,
   WatchProgressResponse,
+  ProfileResponse,
+  DeviceCodeResponse,
+  DeviceCodePollResponse,
 } from '../types';
 
 const BASE = '';
@@ -40,9 +43,20 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       if (!retry.ok) throw new ApiError(retry.status, await retry.text());
       return hasNoBody(retry) ? (undefined as T) : retry.json();
     }
+    // Remove failed session from sessions array
+    const sessions = JSON.parse(localStorage.getItem('sv_sessions') || '[]');
+    const activeUserId = localStorage.getItem('sv_activeUserId');
+    const remaining = sessions.filter((s: { userId: string }) => s.userId !== activeUserId);
+    localStorage.setItem('sv_sessions', JSON.stringify(remaining));
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
-    window.location.href = '/login';
+    if (remaining.length > 0) {
+      window.location.href = '/accounts';
+    } else {
+      localStorage.removeItem('sv_activeUserId');
+      localStorage.removeItem('sv_profile');
+      window.location.href = '/login';
+    }
     throw new ApiError(401, 'Unauthorized');
   }
 
@@ -71,6 +85,15 @@ async function tryRefreshToken(): Promise<boolean> {
     const data: AuthResponse = await res.json();
     localStorage.setItem('accessToken', data.accessToken);
     localStorage.setItem('refreshToken', data.refreshToken);
+    // Update sessions array
+    const activeUserId = localStorage.getItem('sv_activeUserId');
+    if (activeUserId) {
+      const sessions = JSON.parse(localStorage.getItem('sv_sessions') || '[]');
+      const updated = sessions.map((s: { userId: string }) =>
+        s.userId === activeUserId ? { ...s, accessToken: data.accessToken, refreshToken: data.refreshToken } : s
+      );
+      localStorage.setItem('sv_sessions', JSON.stringify(updated));
+    }
     return true;
   } catch {
     return false;
@@ -97,6 +120,30 @@ export const api = {
       }),
     logout: () =>
       request<void>('/api/auth/logout', { method: 'POST', body: JSON.stringify({ refreshToken: localStorage.getItem('refreshToken') }) }),
+    deviceCode: {
+      create: () => request<DeviceCodeResponse>('/api/auth/device-code', { method: 'POST' }),
+      poll: (deviceCode: string) =>
+        request<DeviceCodePollResponse>('/api/auth/device-code/poll', {
+          method: 'POST',
+          body: JSON.stringify({ deviceCode }),
+        }),
+      authorize: (userCode: string) =>
+        request<{ status: string }>('/api/auth/device-code/authorize', {
+          method: 'POST',
+          body: JSON.stringify({ userCode }),
+        }),
+    },
+  },
+
+  profiles: {
+    list: () => request<ProfileResponse[]>('/api/profiles'),
+    create: (name: string, avatarUrl?: string, pin?: string) =>
+      request<ProfileResponse>('/api/profiles', { method: 'POST', body: JSON.stringify({ name, avatarUrl, pin }) }),
+    update: (id: string, data: { name?: string; avatarUrl?: string; pin?: string; removePin?: boolean }) =>
+      request<ProfileResponse>(`/api/profiles/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    delete: (id: string) => request<void>(`/api/profiles/${id}`, { method: 'DELETE' }),
+    select: (profileId: string, pin?: string) =>
+      request<AuthResponse>(`/api/profiles/${profileId}/select`, { method: 'POST', body: JSON.stringify({ pin }) }),
   },
 
   setup: {

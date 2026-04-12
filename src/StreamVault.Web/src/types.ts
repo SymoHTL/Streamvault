@@ -5,6 +5,16 @@ export interface AuthResponse {
   refreshToken: string;
   expiresAt: string;
   user: UserResponse;
+  profile: ProfileResponse | null;
+  profiles: ProfileResponse[] | null;
+}
+
+export interface ProfileResponse {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  hasPin: boolean;
+  isDefault: boolean;
 }
 
 export interface UserResponse {
@@ -247,4 +257,29 @@ export interface CollectionDetailResponse {
   backdropUrl: string | null;
   items: MediaItemSummaryResponse[];
   createdAt: string;
+}
+
+// === Multi-Account Sessions ===
+export interface AccountSession {
+  userId: string;
+  username: string;
+  email: string;
+  role: string;
+  accessToken: string;
+  refreshToken: string;
+  profiles: ProfileResponse[];
+}
+
+// === Device Code Auth ===
+export interface DeviceCodeResponse {
+  deviceCode: string;
+  userCode: string;
+  qrUrl: string;
+  expiresIn: number;
+  pollInterval: number;
+}
+
+export interface DeviceCodePollResponse {
+  status: 'pending' | 'authorized' | 'expired' | 'denied';
+  auth: AuthResponse | null;
 }

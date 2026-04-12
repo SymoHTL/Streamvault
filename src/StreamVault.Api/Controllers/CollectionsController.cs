@@ -19,9 +19,9 @@ public class CollectionsController : BaseController
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<CollectionResponse>>> GetAll()
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var collections = await _db.Collections
-            .Where(c => c.CreatedByUserId == userId || c.TmdbCollectionId != null)
+            .Where(c => c.CreatedByProfileId == profileId || c.TmdbCollectionId != null)
             .Include(c => c.Items)
             .OrderBy(c => c.Name)
             .Select(c => new CollectionResponse(
@@ -36,10 +36,10 @@ public class CollectionsController : BaseController
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<CollectionDetailResponse>> GetById(Guid id)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var collection = await _db.Collections
             .Include(c => c.Items).ThenInclude(ci => ci.MediaItem).ThenInclude(m => m.Images)
-            .FirstOrDefaultAsync(c => c.Id == id && (c.CreatedByUserId == userId || c.TmdbCollectionId != null));
+            .FirstOrDefaultAsync(c => c.Id == id && (c.CreatedByProfileId == profileId || c.TmdbCollectionId != null));
 
         if (collection == null) return NotFound();
 
@@ -78,12 +78,12 @@ public class CollectionsController : BaseController
     [HttpPost]
     public async Task<ActionResult<CollectionResponse>> Create([FromBody] CreateCollectionRequest request)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var collection = new Collection
         {
             Name = request.Name,
             Description = request.Description,
-            CreatedByUserId = userId
+            CreatedByProfileId = profileId
         };
 
         _db.Collections.Add(collection);
@@ -96,8 +96,8 @@ public class CollectionsController : BaseController
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateCollectionRequest request)
     {
-        var userId = GetUserId();
-        var collection = await _db.Collections.FirstOrDefaultAsync(c => c.Id == id && c.CreatedByUserId == userId);
+        var profileId = GetProfileId();
+        var collection = await _db.Collections.FirstOrDefaultAsync(c => c.Id == id && c.CreatedByProfileId == profileId);
         if (collection == null) return NotFound();
 
         if (request.Name != null) collection.Name = request.Name;
@@ -113,8 +113,8 @@ public class CollectionsController : BaseController
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
     {
-        var userId = GetUserId();
-        var collection = await _db.Collections.FirstOrDefaultAsync(c => c.Id == id && c.CreatedByUserId == userId);
+        var profileId = GetProfileId();
+        var collection = await _db.Collections.FirstOrDefaultAsync(c => c.Id == id && c.CreatedByProfileId == profileId);
         if (collection == null) return NotFound();
 
         _db.Collections.Remove(collection);
@@ -125,10 +125,10 @@ public class CollectionsController : BaseController
     [HttpPost("{id:guid}/items/{mediaItemId:guid}")]
     public async Task<IActionResult> AddItem(Guid id, Guid mediaItemId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var collection = await _db.Collections
             .Include(c => c.Items)
-            .FirstOrDefaultAsync(c => c.Id == id && c.CreatedByUserId == userId);
+            .FirstOrDefaultAsync(c => c.Id == id && c.CreatedByProfileId == profileId);
         if (collection == null) return NotFound();
 
         if (collection.Items.Any(ci => ci.MediaItemId == mediaItemId))
@@ -159,10 +159,10 @@ public class CollectionsController : BaseController
     [HttpDelete("{id:guid}/items/{mediaItemId:guid}")]
     public async Task<IActionResult> RemoveItem(Guid id, Guid mediaItemId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var item = await _db.CollectionItems
             .Include(ci => ci.Collection)
-            .FirstOrDefaultAsync(ci => ci.CollectionId == id && ci.MediaItemId == mediaItemId && ci.Collection.CreatedByUserId == userId);
+            .FirstOrDefaultAsync(ci => ci.CollectionId == id && ci.MediaItemId == mediaItemId && ci.Collection.CreatedByProfileId == profileId);
 
         if (item == null) return NotFound();
 

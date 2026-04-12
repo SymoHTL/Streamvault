@@ -6,8 +6,8 @@ public class WatchProgress : BaseEntity
     public bool Completed { get; set; }
     public DateTime LastWatchedAt { get; set; } = DateTime.UtcNow;
 
-    public Guid UserId { get; set; }
-    public User User { get; set; } = null!;
+    public Guid ProfileId { get; set; }
+    public Profile Profile { get; set; } = null!;
 
     public Guid MediaFileId { get; set; }
     public MediaFile MediaFile { get; set; } = null!;

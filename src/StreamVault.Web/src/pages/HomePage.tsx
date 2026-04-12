@@ -43,30 +43,30 @@ export default function HomePage() {
           <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-t from-surface dark:from-surface-dark via-transparent to-transparent" />
 
-          <div className="relative flex items-end min-h-[480px] px-10 pb-12">
-            <div className="max-w-xl">
-              <h1 className="text-4xl lg:text-5xl font-bold text-white mb-3 drop-shadow-lg">{heroItem.title}</h1>
-              <div className="flex items-center gap-3 text-sm text-white/70 mb-4">
+          <div className="relative flex items-end min-h-[480px] 2xl:min-h-[600px] px-10 2xl:px-16 pb-12 2xl:pb-16">
+            <div className="max-w-xl 2xl:max-w-2xl">
+              <h1 className="text-4xl lg:text-5xl 2xl:text-6xl font-bold text-white mb-3 2xl:mb-5 drop-shadow-lg">{heroItem.title}</h1>
+              <div className="flex items-center gap-3 text-sm 2xl:text-lg text-white/70 mb-4 2xl:mb-6">
                 {heroItem.year && <span className="font-medium">{heroItem.year}</span>}
                 {heroItem.communityRating && (
                   <span className="flex items-center gap-1">
-                    <Star size={14} className="text-yellow-400 fill-yellow-400" />
+                    <Star size={14} className="text-yellow-400 fill-yellow-400 2xl:!w-5 2xl:!h-5" />
                     {heroItem.communityRating.toFixed(1)}
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 2xl:gap-4">
                 <Link
                   to={`/media/${heroItem.id}`}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors text-base"
+                  className="inline-flex items-center gap-2 px-6 py-3 2xl:px-10 2xl:py-4 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors text-base 2xl:text-xl"
                 >
-                  <Play size={20} fill="currentColor" /> {t('media.play')}
+                  <Play size={20} fill="currentColor" className="2xl:!w-7 2xl:!h-7" /> {t('media.play')}
                 </Link>
                 <Link
                   to={`/media/${heroItem.id}`}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-white/20 hover:bg-white/30 text-white rounded-lg font-semibold transition-colors text-base backdrop-blur-sm"
+                  className="inline-flex items-center gap-2 px-6 py-3 2xl:px-10 2xl:py-4 bg-white/20 hover:bg-white/30 text-white rounded-lg font-semibold transition-colors text-base 2xl:text-xl backdrop-blur-sm"
                 >
-                  <Info size={20} /> {t('media.details', 'More Info')}
+                  <Info size={20} className="2xl:!w-7 2xl:!h-7" /> {t('media.details', 'More Info')}
                 </Link>
               </div>
             </div>
@@ -74,7 +74,7 @@ export default function HomePage() {
         </section>
       )}
 
-      <div className="px-6 space-y-2">
+      <div className="px-6 2xl:px-10 space-y-2 2xl:space-y-4">
         <MediaRow title={t('home.continueWatching')} items={data.continueWatching} showEpisodeInfo />
         <MediaRow title={t('home.recentlyAdded')} items={data.recentlyAdded} />
         <MediaRow title={t('home.recentlyWatched')} items={data.recentlyWatched} />

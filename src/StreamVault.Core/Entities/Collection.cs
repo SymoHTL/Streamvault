@@ -9,8 +9,8 @@ public class Collection : BaseEntity
     public int SortOrder { get; set; }
     public int? TmdbCollectionId { get; set; }
 
-    public Guid? CreatedByUserId { get; set; }
-    public User? CreatedBy { get; set; }
+    public Guid? CreatedByProfileId { get; set; }
+    public Profile? CreatedBy { get; set; }
 
     public ICollection<CollectionItem> Items { get; set; } = [];
 }

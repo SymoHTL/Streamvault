@@ -12,11 +12,61 @@ public record AuthResponse(
     string AccessToken,
     string RefreshToken,
     DateTime ExpiresAt,
-    UserResponse User
+    UserResponse User,
+    ProfileResponse? Profile,
+    IReadOnlyList<ProfileResponse>? Profiles
 );
 
 public record RefreshTokenRequest(
     [Required] string RefreshToken
+);
+
+// === Profiles ===
+public record ProfileResponse(
+    Guid Id,
+    string Name,
+    string? AvatarUrl,
+    bool HasPin,
+    bool IsDefault
+);
+
+public record CreateProfileRequest(
+    [Required] string Name,
+    string? AvatarUrl,
+    string? Pin
+);
+
+public record UpdateProfileRequest(
+    string? Name,
+    string? AvatarUrl,
+    string? Pin,
+    bool? RemovePin
+);
+
+public record SelectProfileRequest(
+    string? Pin
+);
+
+// === Device Code Auth ===
+public record DeviceCodeResponse(
+    string DeviceCode,
+    string UserCode,
+    string QrUrl,
+    int ExpiresIn,
+    int PollInterval
+);
+
+public record DeviceCodePollRequest(
+    [Required] string DeviceCode
+);
+
+public record DeviceCodePollResponse(
+    string Status,
+    AuthResponse? Auth
+);
+
+public record DeviceCodeAuthorizeRequest(
+    [Required] string UserCode
 );
 
 // === Setup ===
@@ -55,7 +105,7 @@ public record UpdateUserRequest(
     string? Role
 );
 
-public record UpdateProfileRequest(
+public record UpdateAccountRequest(
     string? Email,
     string? Password,
     string? PreferencesJson

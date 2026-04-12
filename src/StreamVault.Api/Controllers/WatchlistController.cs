@@ -17,9 +17,9 @@ public class WatchlistController : BaseController
     [HttpGet]
     public async Task<ActionResult<WatchlistResponse>> GetAll()
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var items = await _db.WatchlistItems
-            .Where(wi => wi.UserId == userId)
+            .Where(wi => wi.ProfileId == profileId)
             .Include(wi => wi.MediaItem).ThenInclude(mi => mi.Images)
             .OrderByDescending(wi => wi.CreatedAt)
             .Select(wi => new MediaItemSummaryResponse(
@@ -40,9 +40,9 @@ public class WatchlistController : BaseController
     [HttpPost("{mediaItemId:guid}")]
     public async Task<IActionResult> Add(Guid mediaItemId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var exists = await _db.WatchlistItems
-            .AnyAsync(wi => wi.UserId == userId && wi.MediaItemId == mediaItemId);
+            .AnyAsync(wi => wi.ProfileId == profileId && wi.MediaItemId == mediaItemId);
 
         if (exists) return Conflict("Already in watchlist");
 
@@ -51,7 +51,7 @@ public class WatchlistController : BaseController
 
         _db.WatchlistItems.Add(new Core.Entities.WatchlistItem
         {
-            UserId = userId,
+            ProfileId = profileId,
             MediaItemId = mediaItemId
         });
 
@@ -62,9 +62,9 @@ public class WatchlistController : BaseController
     [HttpDelete("{mediaItemId:guid}")]
     public async Task<IActionResult> Remove(Guid mediaItemId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var item = await _db.WatchlistItems
-            .FirstOrDefaultAsync(wi => wi.UserId == userId && wi.MediaItemId == mediaItemId);
+            .FirstOrDefaultAsync(wi => wi.ProfileId == profileId && wi.MediaItemId == mediaItemId);
 
         if (item == null) return NotFound();
 

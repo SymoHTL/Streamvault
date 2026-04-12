@@ -19,18 +19,24 @@ public class TokenService : ITokenService
         _jwt = settings.Value.Jwt;
     }
 
-    public string GenerateAccessToken(User user)
+    public string GenerateAccessToken(User user, Profile? profile = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwt.Secret));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new Claim(ClaimTypes.Name, user.Username),
-            new Claim(ClaimTypes.Email, user.Email),
-            new Claim(ClaimTypes.Role, user.Role.ToString())
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.Username),
+            new(ClaimTypes.Email, user.Email),
+            new(ClaimTypes.Role, user.Role.ToString())
         };
+
+        if (profile != null)
+        {
+            claims.Add(new Claim("ProfileId", profile.Id.ToString()));
+            claims.Add(new Claim("ProfileName", profile.Name));
+        }
 
         var token = new JwtSecurityToken(
             issuer: _jwt.Issuer,

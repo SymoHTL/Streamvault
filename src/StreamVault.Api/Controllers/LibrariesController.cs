@@ -143,7 +143,7 @@ public class LibrariesController : BaseController
         };
 
         var totalCount = await query.CountAsync();
-        var userId = GetUserId();
+        var profileId = GetProfileId();
 
         var items = await query
             .Skip((page - 1) * pageSize)
@@ -154,7 +154,7 @@ public class LibrariesController : BaseController
                 m.Images.Where(i => i.Type == ImageType.Poster).Select(i => i.SourceUrl ?? $"/api/images/{i.Id}").FirstOrDefault(),
                 m.AddedAt,
                 _db.WatchProgresses
-                    .Where(wp => wp.UserId == userId && wp.MediaFile.MediaItemId == m.Id)
+                    .Where(wp => wp.ProfileId == profileId && wp.MediaFile.MediaItemId == m.Id)
                     .OrderByDescending(wp => wp.LastWatchedAt)
                     .Select(wp => new WatchProgressResponse(wp.MediaFileId, wp.PositionTicks, wp.Completed, wp.LastWatchedAt, wp.MediaFile.DurationSeconds))
                     .FirstOrDefault()

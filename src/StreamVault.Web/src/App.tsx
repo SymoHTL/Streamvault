@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStore } from './stores/authStore';
 import { useThemeStore } from './stores/themeStore';
-import { useEffect, useLayoutEffect } from 'react';
+import { useLayoutEffect } from 'react';
 
 import Layout from './components/Layout';
 import LoginPage from './pages/LoginPage';
@@ -16,6 +16,9 @@ import SettingsPage from './pages/SettingsPage';
 import AdminPage from './pages/AdminPage';
 import ListsPage from './pages/ListsPage';
 import CollectionsPage from './pages/CollectionsPage';
+import ProfilePickerPage from './pages/ProfilePickerPage';
+import AccountPickerPage from './pages/AccountPickerPage';
+import DeviceAuthPage from './pages/DeviceAuthPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,15 +30,31 @@ const queryClient = new QueryClient({
   },
 });
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = useAuthStore((s) => s.accessToken);
-  if (!token) return <Navigate to="/login" replace />;
+function HasSessionRoute({ children }: { children: React.ReactNode }) {
+  const sessions = useAuthStore((s) => s.sessions);
+  if (sessions.length === 0) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+function ActiveAccountRoute({ children }: { children: React.ReactNode }) {
+  const { sessions, activeUserId } = useAuthStore();
+  if (sessions.length === 0) return <Navigate to="/login" replace />;
+  if (!activeUserId) return <Navigate to="/accounts" replace />;
+  return <>{children}</>;
+}
+
+function ProfileRoute({ children }: { children: React.ReactNode }) {
+  const { sessions, activeUserId, profile } = useAuthStore();
+  if (sessions.length === 0) return <Navigate to="/login" replace />;
+  if (!activeUserId) return <Navigate to="/accounts" replace />;
+  if (!profile) return <Navigate to="/profiles" replace />;
   return <>{children}</>;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { accessToken, user } = useAuthStore();
-  if (!accessToken) return <Navigate to="/login" replace />;
+  const { sessions, activeUserId, user } = useAuthStore();
+  if (sessions.length === 0) return <Navigate to="/login" replace />;
+  if (!activeUserId) return <Navigate to="/accounts" replace />;
   if (user?.role !== 'Admin') return <Navigate to="/" replace />;
   return <>{children}</>;
 }
@@ -53,10 +72,17 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/setup" element={<SetupPage />} />
-          <Route path="/player/:mediaFileId" element={
-            <ProtectedRoute><PlayerPage /></ProtectedRoute>
+          <Route path="/auth/device" element={<DeviceAuthPage />} />
+          <Route path="/accounts" element={
+            <HasSessionRoute><AccountPickerPage /></HasSessionRoute>
           } />
-          <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+          <Route path="/profiles" element={
+            <ActiveAccountRoute><ProfilePickerPage /></ActiveAccountRoute>
+          } />
+          <Route path="/player/:mediaFileId" element={
+            <ProfileRoute><PlayerPage /></ProfileRoute>
+          } />
+          <Route element={<ProfileRoute><Layout /></ProfileRoute>}>
             <Route path="/" element={<HomePage />} />
             <Route path="/library/:id" element={<LibraryPage />} />
             <Route path="/media/:id" element={<MediaDetailPage />} />

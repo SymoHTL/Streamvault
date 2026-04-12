@@ -4,8 +4,8 @@ namespace StreamVault.Core.Entities;
 
 public class UserMediaList : BaseEntity
 {
-    public Guid UserId { get; set; }
-    public User User { get; set; } = null!;
+    public Guid ProfileId { get; set; }
+    public Profile Profile { get; set; } = null!;
 
     public Guid MediaItemId { get; set; }
     public MediaItem MediaItem { get; set; } = null!;

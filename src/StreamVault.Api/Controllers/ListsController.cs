@@ -19,9 +19,9 @@ public class ListsController : BaseController
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<UserMediaListDetailResponse>>> GetAll([FromQuery] string? status = null)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var query = _db.UserMediaLists
-            .Where(uml => uml.UserId == userId)
+            .Where(uml => uml.ProfileId == profileId)
             .Include(uml => uml.MediaItem).ThenInclude(m => m.Images)
             .AsQueryable();
 
@@ -52,9 +52,9 @@ public class ListsController : BaseController
     [HttpGet("counts")]
     public async Task<ActionResult<Dictionary<string, int>>> GetCounts()
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var counts = await _db.UserMediaLists
-            .Where(uml => uml.UserId == userId)
+            .Where(uml => uml.ProfileId == profileId)
             .GroupBy(uml => uml.Status)
             .Select(g => new { Status = g.Key.ToString(), Count = g.Count() })
             .ToDictionaryAsync(x => x.Status, x => x.Count);
@@ -65,9 +65,9 @@ public class ListsController : BaseController
     [HttpGet("{mediaItemId:guid}")]
     public async Task<ActionResult<UserMediaListResponse>> Get(Guid mediaItemId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var entry = await _db.UserMediaLists
-            .FirstOrDefaultAsync(uml => uml.UserId == userId && uml.MediaItemId == mediaItemId);
+            .FirstOrDefaultAsync(uml => uml.ProfileId == profileId && uml.MediaItemId == mediaItemId);
 
         if (entry == null) return NoContent();
 
@@ -80,15 +80,15 @@ public class ListsController : BaseController
         if (!Enum.TryParse<MediaListStatus>(request.Status, true, out var status))
             return BadRequest("Invalid status. Valid values: Watching, Completed, Dropped, Planned, OnHold");
 
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var entry = await _db.UserMediaLists
-            .FirstOrDefaultAsync(uml => uml.UserId == userId && uml.MediaItemId == mediaItemId);
+            .FirstOrDefaultAsync(uml => uml.ProfileId == profileId && uml.MediaItemId == mediaItemId);
 
         if (entry == null)
         {
             entry = new UserMediaList
             {
-                UserId = userId,
+                ProfileId = profileId,
                 MediaItemId = mediaItemId,
                 Status = status,
                 Rating = request.Rating,
@@ -110,9 +110,9 @@ public class ListsController : BaseController
     [HttpDelete("{mediaItemId:guid}")]
     public async Task<IActionResult> Remove(Guid mediaItemId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var entry = await _db.UserMediaLists
-            .FirstOrDefaultAsync(uml => uml.UserId == userId && uml.MediaItemId == mediaItemId);
+            .FirstOrDefaultAsync(uml => uml.ProfileId == profileId && uml.MediaItemId == mediaItemId);
 
         if (entry == null) return NotFound();
 

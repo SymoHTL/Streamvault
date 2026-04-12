@@ -7,7 +7,7 @@ import { useAuthStore } from '../stores/authStore';
 export default function SetupPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const setAuth = useAuthStore((s) => s.setAuth);
+  const addSession = useAuthStore((s) => s.addSession);
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,7 +56,7 @@ export default function SetupPage() {
         },
         tmdbApiKey: form.tmdbApiKey || null,
       });
-      setAuth(res.accessToken, res.refreshToken, res.user);
+      addSession(res);
       navigate('/');
     } catch (e) {
       setError(String(e));

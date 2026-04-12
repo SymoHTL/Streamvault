@@ -17,9 +17,9 @@ public class ProgressController : BaseController
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<WatchProgressResponse>>> GetAll()
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var progress = await _db.WatchProgresses
-            .Where(wp => wp.UserId == userId)
+            .Where(wp => wp.ProfileId == profileId)
             .Include(wp => wp.MediaFile)
             .OrderByDescending(wp => wp.LastWatchedAt)
             .Select(wp => new WatchProgressResponse(
@@ -33,9 +33,9 @@ public class ProgressController : BaseController
     [HttpGet("{mediaFileId:guid}")]
     public async Task<ActionResult<WatchProgressResponse>> Get(Guid mediaFileId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var progress = await _db.WatchProgresses
-            .Where(wp => wp.UserId == userId && wp.MediaFileId == mediaFileId)
+            .Where(wp => wp.ProfileId == profileId && wp.MediaFileId == mediaFileId)
             .Include(wp => wp.MediaFile)
             .Select(wp => new WatchProgressResponse(
                 wp.MediaFileId, wp.PositionTicks, wp.Completed, wp.LastWatchedAt, wp.MediaFile.DurationSeconds
@@ -49,18 +49,18 @@ public class ProgressController : BaseController
     [HttpPut("{mediaFileId:guid}")]
     public async Task<IActionResult> Update(Guid mediaFileId, [FromBody] UpdateProgressRequest request)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var mediaFile = await _db.MediaFiles.FindAsync(mediaFileId);
         if (mediaFile == null) return NotFound();
 
         var progress = await _db.WatchProgresses
-            .FirstOrDefaultAsync(wp => wp.UserId == userId && wp.MediaFileId == mediaFileId);
+            .FirstOrDefaultAsync(wp => wp.ProfileId == profileId && wp.MediaFileId == mediaFileId);
 
         if (progress == null)
         {
             progress = new Core.Entities.WatchProgress
             {
-                UserId = userId,
+                ProfileId = profileId,
                 MediaFileId = mediaFileId,
                 PositionTicks = request.PositionTicks,
                 Completed = request.Completed,
@@ -82,9 +82,9 @@ public class ProgressController : BaseController
     [HttpDelete("{mediaFileId:guid}")]
     public async Task<IActionResult> Delete(Guid mediaFileId)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var progress = await _db.WatchProgresses
-            .FirstOrDefaultAsync(wp => wp.UserId == userId && wp.MediaFileId == mediaFileId);
+            .FirstOrDefaultAsync(wp => wp.ProfileId == profileId && wp.MediaFileId == mediaFileId);
 
         if (progress == null) return NotFound();
 

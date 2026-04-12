@@ -16,7 +16,7 @@ public class JwtSettings
     public string Issuer { get; set; } = "StreamVault";
     public string Audience { get; set; } = "StreamVaultApp";
     public int AccessTokenExpiryMinutes { get; set; } = 15;
-    public int RefreshTokenExpiryDays { get; set; } = 7;
+    public int RefreshTokenExpiryDays { get; set; } = 90;
 }
 
 public class TmdbSettings

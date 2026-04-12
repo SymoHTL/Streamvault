@@ -24,7 +24,7 @@ public class MediaController : BaseController
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<MediaItemResponse>> GetById(Guid id)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var item = await _db.MediaItems
             .Include(m => m.MediaFiles).ThenInclude(mf => mf.Subtitles)
             .Include(m => m.MediaFiles).ThenInclude(mf => mf.AudioTracks)
@@ -37,7 +37,7 @@ public class MediaController : BaseController
         if (item == null) return NotFound();
 
         var isInWatchlist = await _db.WatchlistItems
-            .AnyAsync(wi => wi.UserId == userId && wi.MediaItemId == id);
+            .AnyAsync(wi => wi.ProfileId == profileId && wi.MediaItemId == id);
 
         return Ok(new MediaItemResponse(
             item.Id, item.Title, item.SortTitle, item.Year, item.Overview,
@@ -60,7 +60,7 @@ public class MediaController : BaseController
     [HttpGet("{id:guid}/tvshow")]
     public async Task<ActionResult<TvShowDetailResponse>> GetTvShow(Guid id)
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
         var item = await _db.MediaItems
             .Include(m => m.Seasons).ThenInclude(s => s.Episodes).ThenInclude(e => e.MediaFiles).ThenInclude(mf => mf.Subtitles)
             .Include(m => m.Seasons).ThenInclude(s => s.Episodes).ThenInclude(e => e.MediaFiles).ThenInclude(mf => mf.AudioTracks)
@@ -72,7 +72,7 @@ public class MediaController : BaseController
         if (item == null) return NotFound();
 
         var isInWatchlist = await _db.WatchlistItems
-            .AnyAsync(wi => wi.UserId == userId && wi.MediaItemId == id);
+            .AnyAsync(wi => wi.ProfileId == profileId && wi.MediaItemId == id);
 
         var posterPath = item.Images.FirstOrDefault(i => i.Type == ImageType.Poster)?.SourceUrl;
         var backdropPath = item.Images.FirstOrDefault(i => i.Type == ImageType.Backdrop)?.SourceUrl;
@@ -87,7 +87,7 @@ public class MediaController : BaseController
                 {
                     var mf = e.MediaFiles.FirstOrDefault();
                     var progress = mf != null
-                        ? _db.WatchProgresses.FirstOrDefault(wp => wp.UserId == userId && wp.MediaFileId == mf.Id)
+                        ? _db.WatchProgresses.FirstOrDefault(wp => wp.ProfileId == profileId && wp.MediaFileId == mf.Id)
                         : null;
 
                     return new EpisodeResponse(

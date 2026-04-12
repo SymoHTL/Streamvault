@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#863bff"/>
+      <stop offset="100%" stop-color="#47bfff"/>
+    </linearGradient>
+    <linearGradient id="g2" x1="30%" y1="0%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Dark background -->
+  <rect width="512" height="512" rx="108" fill="#0a0a0f"/>
+
+  <!-- Outer subtle glow ring -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="url(#g)" stroke-width="3" opacity="0.25"/>
+
+  <!-- Vault door ring -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="url(#g)" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- Vault bolts — compass points on the ring -->
+  <circle cx="256" cy="86" r="14" fill="url(#g)"/>
+  <circle cx="256" cy="426" r="14" fill="url(#g)"/>
+  <circle cx="86" cy="256" r="14" fill="url(#g)"/>
+  <circle cx="426" cy="256" r="14" fill="url(#g)"/>
+
+  <!-- Small inner dots — diagonal positions -->
+  <circle cx="136" cy="136" r="8" fill="url(#g)" opacity="0.5"/>
+  <circle cx="376" cy="136" r="8" fill="url(#g)" opacity="0.5"/>
+  <circle cx="136" cy="376" r="8" fill="url(#g)" opacity="0.5"/>
+  <circle cx="376" cy="376" r="8" fill="url(#g)" opacity="0.5"/>
+
+  <!-- Play triangle — centered, slightly right-offset for visual balance -->
+  <path d="M 212 164 L 212 348 L 360 256 Z" fill="url(#g)" opacity="0.95"/>
+</svg>

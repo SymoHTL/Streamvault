@@ -9,6 +9,7 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
     public StreamVaultDbContext(DbContextOptions<StreamVaultDbContext> options) : base(options) { }
 
     public DbSet<User> Users => Set<User>();
+    public DbSet<Profile> Profiles => Set<Profile>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<S3Connection> S3Connections => Set<S3Connection>();
     public DbSet<Library> Libraries => Set<Library>();
@@ -30,6 +31,7 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
     public DbSet<TranscodeProfile> TranscodeProfiles => Set<TranscodeProfile>();
     public DbSet<AudioTrack> AudioTracks => Set<AudioTrack>();
+    public DbSet<DeviceCode> DeviceCodes => Set<DeviceCode>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -114,30 +116,30 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
             .HasForeignKey(at => at.MediaFileId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // WatchProgress unique per user+mediafile
+        // WatchProgress unique per profile+mediafile
         modelBuilder.Entity<WatchProgress>()
-            .HasIndex(wp => new { wp.UserId, wp.MediaFileId })
+            .HasIndex(wp => new { wp.ProfileId, wp.MediaFileId })
             .IsUnique();
 
         modelBuilder.Entity<WatchProgress>()
-            .HasOne(wp => wp.User)
-            .WithMany(u => u.WatchProgresses)
-            .HasForeignKey(wp => wp.UserId);
+            .HasOne(wp => wp.Profile)
+            .WithMany(p => p.WatchProgresses)
+            .HasForeignKey(wp => wp.ProfileId);
 
         modelBuilder.Entity<WatchProgress>()
             .HasOne(wp => wp.MediaFile)
             .WithMany(mf => mf.WatchProgresses)
             .HasForeignKey(wp => wp.MediaFileId);
 
-        // WatchlistItem unique per user+mediaitem
+        // WatchlistItem unique per profile+mediaitem
         modelBuilder.Entity<WatchlistItem>()
-            .HasIndex(wi => new { wi.UserId, wi.MediaItemId })
+            .HasIndex(wi => new { wi.ProfileId, wi.MediaItemId })
             .IsUnique();
 
         modelBuilder.Entity<WatchlistItem>()
-            .HasOne(wi => wi.User)
-            .WithMany(u => u.WatchlistItems)
-            .HasForeignKey(wi => wi.UserId);
+            .HasOne(wi => wi.Profile)
+            .WithMany(p => p.WatchlistItems)
+            .HasForeignKey(wi => wi.ProfileId);
 
         modelBuilder.Entity<WatchlistItem>()
             .HasOne(wi => wi.MediaItem)
@@ -150,26 +152,36 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
             .WithMany(u => u.RefreshTokens)
             .HasForeignKey(rt => rt.UserId);
 
-        // UserMediaList unique per user+mediaitem
+        // Profile -> User
+        modelBuilder.Entity<Profile>()
+            .HasOne(p => p.User)
+            .WithMany(u => u.Profiles)
+            .HasForeignKey(p => p.UserId);
+
+        modelBuilder.Entity<Profile>()
+            .HasIndex(p => new { p.UserId, p.Name })
+            .IsUnique();
+
+        // UserMediaList unique per profile+mediaitem
         modelBuilder.Entity<UserMediaList>()
-            .HasIndex(uml => new { uml.UserId, uml.MediaItemId })
+            .HasIndex(uml => new { uml.ProfileId, uml.MediaItemId })
             .IsUnique();
 
         modelBuilder.Entity<UserMediaList>()
-            .HasOne(uml => uml.User)
-            .WithMany(u => u.MediaLists)
-            .HasForeignKey(uml => uml.UserId);
+            .HasOne(uml => uml.Profile)
+            .WithMany(p => p.MediaLists)
+            .HasForeignKey(uml => uml.ProfileId);
 
         modelBuilder.Entity<UserMediaList>()
             .HasOne(uml => uml.MediaItem)
             .WithMany(m => m.UserMediaLists)
             .HasForeignKey(uml => uml.MediaItemId);
 
-        // Collection -> User
+        // Collection -> Profile
         modelBuilder.Entity<Collection>()
             .HasOne(c => c.CreatedBy)
-            .WithMany(u => u.Collections)
-            .HasForeignKey(c => c.CreatedByUserId);
+            .WithMany(p => p.Collections)
+            .HasForeignKey(c => c.CreatedByProfileId);
 
         // CollectionItem
         modelBuilder.Entity<CollectionItem>()
@@ -207,6 +219,20 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
         modelBuilder.Entity<MediaItem>().HasIndex(m => new { m.LibraryId, m.SortTitle });
         modelBuilder.Entity<MediaFile>().HasIndex(mf => mf.S3Key).IsUnique();
         modelBuilder.Entity<RefreshToken>().HasIndex(rt => rt.Token).IsUnique();
+
+        // DeviceCode -> User (optional)
+        modelBuilder.Entity<DeviceCode>()
+            .HasOne(dc => dc.User)
+            .WithMany()
+            .HasForeignKey(dc => dc.UserId);
+
+        modelBuilder.Entity<DeviceCode>()
+            .HasIndex(dc => dc.Code)
+            .IsUnique();
+
+        modelBuilder.Entity<DeviceCode>()
+            .HasIndex(dc => dc.UserCode)
+            .IsUnique();
 
         // Seed default transcode profiles
         modelBuilder.Entity<TranscodeProfile>().HasData(

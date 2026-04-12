@@ -18,11 +18,11 @@ public class HomeController : BaseController
     [HttpGet]
     public async Task<ActionResult<HomeResponse>> Get()
     {
-        var userId = GetUserId();
+        var profileId = GetProfileId();
 
         // Continue watching: items with progress but not completed
         var continueWatchingProgress = await _db.WatchProgresses
-            .Where(wp => wp.UserId == userId && !wp.Completed)
+            .Where(wp => wp.ProfileId == profileId && !wp.Completed)
             .OrderByDescending(wp => wp.LastWatchedAt)
             .Take(20)
             .Include(wp => wp.MediaFile).ThenInclude(mf => mf.Episode!).ThenInclude(e => e.Season)
@@ -95,7 +95,7 @@ public class HomeController : BaseController
 
         // Recently watched (completed)
         var recentlyWatchedProgress = await _db.WatchProgresses
-            .Where(wp => wp.UserId == userId && wp.Completed)
+            .Where(wp => wp.ProfileId == profileId && wp.Completed)
             .OrderByDescending(wp => wp.LastWatchedAt)
             .Take(20)
             .Include(wp => wp.MediaFile).ThenInclude(mf => mf.Episode!).ThenInclude(e => e.Season)

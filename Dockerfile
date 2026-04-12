@@ -2,7 +2,7 @@
 FROM node:22-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY src/StreamVault.Web/package*.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY src/StreamVault.Web/ ./
 RUN npm run build
 

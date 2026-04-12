@@ -9,6 +9,7 @@ using Serilog;
 using StreamVault.Api.Hubs;
 using StreamVault.Api.Middleware;
 using StreamVault.Core.Configuration;
+using StreamVault.Api;
 using StreamVault.Infrastructure;
 using StreamVault.Infrastructure.Data;
 
@@ -154,10 +155,14 @@ try
                 FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id)
             );
             """);
-        await db.Database.ExecuteSqlRawAsync("""
-            CREATE UNIQUE INDEX IF NOT EXISTS IX_UserMediaLists_UserId_MediaItemId
-            ON UserMediaLists (UserId, MediaItemId);
-            """);
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_UserMediaLists_UserId_MediaItemId
+                ON UserMediaLists (UserId, MediaItemId);
+                """);
+        }
+        catch { /* Column may not exist on fresh databases with ProfileId schema */ }
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TABLE IF NOT EXISTS Collections (
                 Id TEXT NOT NULL PRIMARY KEY,
@@ -244,6 +249,216 @@ try
             );
             """);
 
+        // --- Profile system migration: multi-profile support ---
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS Profiles (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Name TEXT NOT NULL,
+                AvatarUrl TEXT NULL,
+                PinHash TEXT NULL,
+                IsDefault INTEGER NOT NULL DEFAULT 0,
+                UserId TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (UserId) REFERENCES Users(Id) ON DELETE CASCADE
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_Profiles_UserId_Name
+            ON Profiles (UserId, Name);
+            """);
+
+        // Create a default profile for each user that doesn't have one yet
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO Profiles (Id, Name, IsDefault, UserId, CreatedAt, UpdatedAt)
+            SELECT lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+                   substr(hex(randomblob(2)),2) || '-' ||
+                   substr('89ab', abs(random()) % 4 + 1, 1) ||
+                   substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+                   Username, 1, Id, datetime('now'), datetime('now')
+            FROM Users
+            WHERE Id NOT IN (SELECT UserId FROM Profiles);
+            """);
+
+        // Migrate WatchProgresses: UserId → ProfileId
+        {
+            var hasUserId = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS \"Value\" FROM pragma_table_info('WatchProgresses') WHERE name='UserId'"
+            ).FirstOrDefaultAsync();
+            if (hasUserId > 0)
+            {
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE WatchProgresses ADD COLUMN ProfileId TEXT NULL;"); } catch { }
+                await db.Database.ExecuteSqlRawAsync("""
+                    UPDATE WatchProgresses SET ProfileId = (
+                        SELECT p.Id FROM Profiles p WHERE p.UserId = WatchProgresses.UserId AND p.IsDefault = 1
+                    ) WHERE ProfileId IS NULL;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE WatchProgresses_new (
+                        Id TEXT NOT NULL PRIMARY KEY,
+                        ProfileId TEXT NOT NULL,
+                        MediaFileId TEXT NOT NULL,
+                        PositionTicks INTEGER NOT NULL DEFAULT 0,
+                        Completed INTEGER NOT NULL DEFAULT 0,
+                        LastWatchedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        FOREIGN KEY (ProfileId) REFERENCES Profiles(Id) ON DELETE CASCADE,
+                        FOREIGN KEY (MediaFileId) REFERENCES MediaFiles(Id) ON DELETE CASCADE
+                    );
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO WatchProgresses_new (Id, ProfileId, MediaFileId, PositionTicks, Completed, LastWatchedAt, CreatedAt, UpdatedAt)
+                    SELECT Id, ProfileId, MediaFileId, PositionTicks, Completed, LastWatchedAt, CreatedAt, UpdatedAt
+                    FROM WatchProgresses;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE WatchProgresses;");
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE WatchProgresses_new RENAME TO WatchProgresses;");
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS IX_WatchProgresses_ProfileId_MediaFileId
+                    ON WatchProgresses (ProfileId, MediaFileId);
+                    """);
+            }
+        }
+
+        // Migrate WatchlistItems: UserId → ProfileId
+        {
+            var hasUserId = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS \"Value\" FROM pragma_table_info('WatchlistItems') WHERE name='UserId'"
+            ).FirstOrDefaultAsync();
+            if (hasUserId > 0)
+            {
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE WatchlistItems ADD COLUMN ProfileId TEXT NULL;"); } catch { }
+                await db.Database.ExecuteSqlRawAsync("""
+                    UPDATE WatchlistItems SET ProfileId = (
+                        SELECT p.Id FROM Profiles p WHERE p.UserId = WatchlistItems.UserId AND p.IsDefault = 1
+                    ) WHERE ProfileId IS NULL;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE WatchlistItems_new (
+                        Id TEXT NOT NULL PRIMARY KEY,
+                        ProfileId TEXT NOT NULL,
+                        MediaItemId TEXT NOT NULL,
+                        CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        FOREIGN KEY (ProfileId) REFERENCES Profiles(Id) ON DELETE CASCADE,
+                        FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id) ON DELETE CASCADE
+                    );
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO WatchlistItems_new (Id, ProfileId, MediaItemId, CreatedAt, UpdatedAt)
+                    SELECT Id, ProfileId, MediaItemId, CreatedAt, UpdatedAt
+                    FROM WatchlistItems;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE WatchlistItems;");
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE WatchlistItems_new RENAME TO WatchlistItems;");
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS IX_WatchlistItems_ProfileId_MediaItemId
+                    ON WatchlistItems (ProfileId, MediaItemId);
+                    """);
+            }
+        }
+
+        // Migrate UserMediaLists: UserId → ProfileId
+        {
+            var hasUserId = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS \"Value\" FROM pragma_table_info('UserMediaLists') WHERE name='UserId'"
+            ).FirstOrDefaultAsync();
+            if (hasUserId > 0)
+            {
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE UserMediaLists ADD COLUMN ProfileId TEXT NULL;"); } catch { }
+                await db.Database.ExecuteSqlRawAsync("""
+                    UPDATE UserMediaLists SET ProfileId = (
+                        SELECT p.Id FROM Profiles p WHERE p.UserId = UserMediaLists.UserId AND p.IsDefault = 1
+                    ) WHERE ProfileId IS NULL;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE UserMediaLists_new (
+                        Id TEXT NOT NULL PRIMARY KEY,
+                        ProfileId TEXT NOT NULL,
+                        MediaItemId TEXT NOT NULL,
+                        Status INTEGER NOT NULL DEFAULT 0,
+                        Rating INTEGER NULL,
+                        Notes TEXT NULL,
+                        CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        FOREIGN KEY (ProfileId) REFERENCES Profiles(Id) ON DELETE CASCADE,
+                        FOREIGN KEY (MediaItemId) REFERENCES MediaItems(Id)
+                    );
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO UserMediaLists_new (Id, ProfileId, MediaItemId, Status, Rating, Notes, CreatedAt, UpdatedAt)
+                    SELECT Id, ProfileId, MediaItemId, Status, Rating, Notes, CreatedAt, UpdatedAt
+                    FROM UserMediaLists;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE UserMediaLists;");
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE UserMediaLists_new RENAME TO UserMediaLists;");
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS IX_UserMediaLists_ProfileId_MediaItemId
+                    ON UserMediaLists (ProfileId, MediaItemId);
+                    """);
+            }
+        }
+
+        // Migrate Collections: CreatedByUserId → CreatedByProfileId
+        {
+            var hasUserId = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS \"Value\" FROM pragma_table_info('Collections') WHERE name='CreatedByUserId'"
+            ).FirstOrDefaultAsync();
+            if (hasUserId > 0)
+            {
+                try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Collections ADD COLUMN CreatedByProfileId TEXT NULL;"); } catch { }
+                await db.Database.ExecuteSqlRawAsync("""
+                    UPDATE Collections SET CreatedByProfileId = (
+                        SELECT p.Id FROM Profiles p WHERE p.UserId = Collections.CreatedByUserId AND p.IsDefault = 1
+                    ) WHERE CreatedByProfileId IS NULL AND CreatedByUserId IS NOT NULL;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    CREATE TABLE Collections_v2 (
+                        Id TEXT NOT NULL PRIMARY KEY,
+                        Name TEXT NOT NULL,
+                        Description TEXT NULL,
+                        PosterUrl TEXT NULL,
+                        BackdropUrl TEXT NULL,
+                        SortOrder INTEGER NOT NULL DEFAULT 0,
+                        TmdbCollectionId INTEGER NULL,
+                        CreatedByProfileId TEXT NULL,
+                        CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                        FOREIGN KEY (CreatedByProfileId) REFERENCES Profiles(Id)
+                    );
+                    """);
+                await db.Database.ExecuteSqlRawAsync("""
+                    INSERT INTO Collections_v2 (Id, Name, Description, PosterUrl, BackdropUrl, SortOrder, TmdbCollectionId, CreatedByProfileId, CreatedAt, UpdatedAt)
+                    SELECT Id, Name, Description, PosterUrl, BackdropUrl, SortOrder, TmdbCollectionId, CreatedByProfileId, CreatedAt, UpdatedAt
+                    FROM Collections;
+                    """);
+                await db.Database.ExecuteSqlRawAsync("DROP TABLE Collections;");
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE Collections_v2 RENAME TO Collections;");
+            }
+        }
+
+        // DeviceCodes table for QR code login
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS DeviceCodes (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Code TEXT NOT NULL,
+                UserCode TEXT NOT NULL,
+                Status INTEGER NOT NULL DEFAULT 0,
+                ExpiresAt TEXT NOT NULL,
+                UserId TEXT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (UserId) REFERENCES Users(Id)
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_DeviceCodes_Code ON DeviceCodes (Code);
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_DeviceCodes_UserCode ON DeviceCodes (UserCode);
+            """);
+
     }
 
     // Middleware pipeline
@@ -268,6 +483,12 @@ try
     app.MapHub<NotificationHub>("/hubs/notifications");
     app.MapHealthChecks("/health");
     app.MapHangfireDashboard("/admin/jobs");
+
+    // Recurring cleanup jobs (must be after Hangfire is initialized)
+    RecurringJob.AddOrUpdate<TokenCleanupService>("cleanup-expired-refresh-tokens",
+        svc => svc.CleanupExpiredRefreshTokens(), Cron.Daily);
+    RecurringJob.AddOrUpdate<TokenCleanupService>("cleanup-expired-device-codes",
+        svc => svc.CleanupExpiredDeviceCodes(), Cron.Hourly);
 
     // SPA fallback — return index.html for unmatched routes
     app.MapFallbackToFile("index.html");

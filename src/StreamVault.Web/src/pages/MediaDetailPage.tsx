@@ -130,23 +130,23 @@ export default function MediaDetailPage() {
         <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-t from-surface dark:from-surface-dark via-transparent to-transparent" />
 
-        <div className="relative flex gap-8 min-h-[520px] items-end px-10 pb-10">
+        <div className="relative flex gap-8 2xl:gap-12 min-h-[520px] 2xl:min-h-[640px] items-end px-10 2xl:px-16 pb-10 2xl:pb-14">
           {poster && (
-            <img src={poster} alt={media.title} className="w-52 rounded-xl shadow-2xl hidden sm:block" />
+            <img src={poster} alt={media.title} className="w-52 2xl:w-72 rounded-xl shadow-2xl hidden sm:block" />
           )}
-          <div className="flex-1 max-w-3xl">
-            <h1 className="text-4xl lg:text-5xl font-bold text-white mb-3 drop-shadow-lg">{media.title}</h1>
-            <div className="flex flex-wrap items-center gap-3 text-white/70 mb-4">
-              {media.year && <span className="font-medium text-base">{media.year}</span>}
+          <div className="flex-1 max-w-3xl 2xl:max-w-4xl">
+            <h1 className="text-4xl lg:text-5xl 2xl:text-6xl font-bold text-white mb-3 2xl:mb-5 drop-shadow-lg">{media.title}</h1>
+            <div className="flex flex-wrap items-center gap-3 2xl:gap-4 text-white/70 mb-4 2xl:mb-6">
+              {media.year && <span className="font-medium text-base 2xl:text-lg">{media.year}</span>}
               {media.communityRating && (
-                <span className="flex items-center gap-1 text-base">
-                  <Star size={16} className="text-yellow-400 fill-yellow-400" />
+                <span className="flex items-center gap-1 text-base 2xl:text-lg">
+                  <Star size={16} className="text-yellow-400 fill-yellow-400 2xl:!w-5 2xl:!h-5" />
                   {media.communityRating.toFixed(1)}
                 </span>
               )}
               {media.runtimeMinutes && (
-                <span className="flex items-center gap-1 text-base">
-                  <Clock size={16} /> {media.runtimeMinutes} {t('media.runtime')}
+                <span className="flex items-center gap-1 text-base 2xl:text-lg">
+                  <Clock size={16} className="2xl:!w-5 2xl:!h-5" /> {media.runtimeMinutes} {t('media.runtime')}
                 </span>
               )}
               {selectedFile && formatQuality(selectedFile.resolution) && (
@@ -156,14 +156,14 @@ export default function MediaDetailPage() {
               )}
             </div>
             {media.genres.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 2xl:gap-3 mb-4 2xl:mb-6">
                 {media.genres.map((g) => (
-                  <span key={g} className="px-3 py-1 text-sm rounded-full bg-white/10 text-white/80 backdrop-blur-sm">{g}</span>
+                  <span key={g} className="px-3 py-1 2xl:px-4 2xl:py-1.5 text-sm 2xl:text-base rounded-full bg-white/10 text-white/80 backdrop-blur-sm">{g}</span>
                 ))}
               </div>
             )}
             {media.overview && (
-              <p className="text-base text-white/60 mb-6 leading-relaxed line-clamp-4">{media.overview}</p>
+              <p className="text-base 2xl:text-lg text-white/60 mb-6 2xl:mb-8 leading-relaxed line-clamp-4">{media.overview}</p>
             )}
 
             {/* Language version chips — shown when multiple files exist */}
@@ -193,11 +193,11 @@ export default function MediaDetailPage() {
             )}
 
             {/* Action buttons */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 2xl:gap-4">
               {selectedFile && (
                 <button
                   onClick={handlePlay}
-                  className="flex items-center gap-2 px-8 py-3.5 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors cursor-pointer text-base"
+                  className="flex items-center gap-2 px-8 py-3.5 2xl:px-10 2xl:py-4 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors cursor-pointer text-base 2xl:text-xl"
                 >
                   <Play size={22} fill="currentColor" /> {t('media.play')}
                 </button>

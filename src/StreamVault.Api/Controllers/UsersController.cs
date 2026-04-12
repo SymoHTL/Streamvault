@@ -96,7 +96,7 @@ public class UsersController : BaseController
     }
 
     [HttpPut("me")]
-    public async Task<ActionResult<UserResponse>> UpdateMe([FromBody] UpdateProfileRequest request)
+    public async Task<ActionResult<UserResponse>> UpdateMe([FromBody] UpdateAccountRequest request)
     {
         var user = await _db.Users.FindAsync(GetUserId());
         if (user == null) return NotFound();

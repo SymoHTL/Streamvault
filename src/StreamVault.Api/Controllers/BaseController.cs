@@ -13,6 +13,18 @@ public abstract class BaseController : ControllerBase
         return claim != null ? Guid.Parse(claim) : throw new UnauthorizedAccessException();
     }
 
+    protected Guid GetProfileId()
+    {
+        var claim = User.FindFirst("ProfileId")?.Value;
+        return claim != null ? Guid.Parse(claim) : throw new UnauthorizedAccessException("No profile selected");
+    }
+
+    protected Guid? TryGetProfileId()
+    {
+        var claim = User.FindFirst("ProfileId")?.Value;
+        return claim != null && Guid.TryParse(claim, out var id) ? id : null;
+    }
+
     protected string GetUserRole()
     {
         return User.FindFirst(ClaimTypes.Role)?.Value ?? "User";

@@ -38,6 +38,15 @@ input[type="checkbox"], input[type="radio"], input[type="range"],
   color-scheme: dark;
 }
 
+/* ============================================
+   TV / D-pad focus styles
+   ============================================ */
+*:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
 /* Horizontal scrolling rows - Netflix-style */
 .media-scroll {
   display: flex;
@@ -60,7 +69,77 @@ input[type="checkbox"], input[type="radio"], input[type="range"],
 }
 @media (min-width: 640px) { .media-card-wrapper { width: 220px; } }
 @media (min-width: 1024px) { .media-card-wrapper { width: 240px; } }
-.media-card-wrapper:hover {
+.media-card-wrapper:hover,
+.media-card-wrapper:focus-within {
   transform: scale(1.08);
   z-index: 10;
+}
+
+/* ============================================
+   TV Mode — large screens (1800px+, couch distance)
+   Scales up everything for 10-foot UI
+   ============================================ */
+@media (min-width: 1800px) {
+  html {
+    font-size: 20px;
+  }
+
+  /* Bigger media cards on TV */
+  .media-card-wrapper {
+    width: 300px;
+  }
+
+  .media-scroll {
+    gap: 1.25rem;
+  }
+
+  /* Bigger sidebar nav items */
+  .tv-nav-link {
+    padding: 0.875rem 1.25rem;
+    font-size: 1.1rem;
+  }
+
+  /* Bigger buttons across the board */
+  button, [role="button"], .btn {
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  /* Bigger inputs */
+  input, select, textarea {
+    min-height: 52px;
+    font-size: 1.1rem;
+    padding: 0.75rem 1rem;
+  }
+
+  /* Bigger play overlay on cards */
+  .media-card-wrapper .play-overlay {
+    width: 4rem;
+    height: 4rem;
+  }
+}
+
+/* Extra large TVs (4K) */
+@media (min-width: 2500px) {
+  html {
+    font-size: 24px;
+  }
+
+  .media-card-wrapper {
+    width: 380px;
+  }
+
+  .media-scroll {
+    gap: 1.5rem;
+  }
+}
+
+/* Safe area insets for notched devices & TV overscan */
+@supports (padding: env(safe-area-inset-left)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
