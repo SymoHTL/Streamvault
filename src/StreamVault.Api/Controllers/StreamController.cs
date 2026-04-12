@@ -238,14 +238,14 @@ public class StreamController : BaseController
         {
             // Pre-signed URL: -ss before -i for fast keyframe-accurate seeking
             var seekArgs = start > 0 ? $"-ss {start:F2}" : "";
-            args = $"{seekArgs} -i \"{presignedUrl}\" {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
+            args = $"{seekArgs} -fflags +genpts -i \"{presignedUrl}\" {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -avoid_negative_ts make_zero -af aresample=async=1:first_pts=0 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
             usePipe = false;
         }
         else
         {
             // Pipe: -ss after -i (output seeking, slower)
             var seekArgs = start > 0 ? $"-ss {start:F2}" : "";
-            args = $"-i pipe:0 {seekArgs} {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
+            args = $"-fflags +genpts -i pipe:0 {seekArgs} {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -avoid_negative_ts make_zero -af aresample=async=1:first_pts=0 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
             usePipe = true;
         }
 

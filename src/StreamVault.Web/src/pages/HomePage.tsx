@@ -28,10 +28,10 @@ export default function HomePage() {
   const heroBackdrop = heroItem?.posterPath;
 
   return (
-    <div className="-mx-6 -mt-6">
+    <div className="-mx-4 md:-mx-6 -mt-4 md:-mt-6">
       {/* Cinematic Hero */}
       {heroItem && (
-        <section className="relative mb-8 overflow-hidden" style={{ minHeight: '480px' }}>
+        <section className="relative mb-8 overflow-hidden min-h-[280px] sm:min-h-[400px] lg:min-h-[480px]">
           {heroBackdrop && (
             <img
               src={heroBackdrop}
@@ -43,7 +43,7 @@ export default function HomePage() {
           <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/40 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-t from-surface dark:from-surface-dark via-transparent to-transparent" />
 
-          <div className="relative flex items-end min-h-[480px] 2xl:min-h-[600px] px-10 2xl:px-16 pb-12 2xl:pb-16">
+          <div className="relative flex items-end min-h-[280px] sm:min-h-[400px] lg:min-h-[480px] 2xl:min-h-[600px] px-4 sm:px-6 lg:px-10 2xl:px-16 pb-8 sm:pb-10 lg:pb-12 2xl:pb-16">
             <div className="max-w-xl 2xl:max-w-2xl">
               <h1 className="text-4xl lg:text-5xl 2xl:text-6xl font-bold text-white mb-3 2xl:mb-5 drop-shadow-lg">{heroItem.title}</h1>
               <div className="flex items-center gap-3 text-sm 2xl:text-lg text-white/70 mb-4 2xl:mb-6">
@@ -74,7 +74,7 @@ export default function HomePage() {
         </section>
       )}
 
-      <div className="px-6 2xl:px-10 space-y-2 2xl:space-y-4">
+      <div className="px-4 md:px-6 2xl:px-10 space-y-2 2xl:space-y-4">
         <MediaRow title={t('home.continueWatching')} items={data.continueWatching} showEpisodeInfo />
         <MediaRow title={t('home.recentlyAdded')} items={data.recentlyAdded} />
         <MediaRow title={t('home.recentlyWatched')} items={data.recentlyWatched} />

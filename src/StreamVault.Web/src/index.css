@@ -64,7 +64,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"],
 /* Smooth hover scale for cards */
 .media-card-wrapper {
   flex-shrink: 0;
-  width: 200px;
+  width: 150px;
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 @media (min-width: 640px) { .media-card-wrapper { width: 220px; } }

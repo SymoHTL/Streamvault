@@ -576,6 +576,12 @@ export default function PlayerPage() {
       onClick={(e) => {
         // Click on video area = toggle play/pause
         if ((e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).closest('[data-cast-overlay]')) {
+          // On touch devices, first tap shows controls; only toggle playback if controls are already visible
+          const isTouch = e.detail === 0 || matchMedia('(pointer: coarse)').matches;
+          if (isTouch && !showControls) {
+            resetControlsTimer();
+            return;
+          }
           if (chromecast.isConnected && chromecast.isMediaLoaded) {
             chromecast.playOrPause();
           } else {

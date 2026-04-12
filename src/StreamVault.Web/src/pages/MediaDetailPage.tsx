@@ -109,16 +109,16 @@ export default function MediaDetailPage() {
   };
 
   return (
-    <div className="-mx-6 -mt-6" onClick={() => { setShowListMenu(false); setShowMoreMenu(false); }}>
+    <div className="-mx-4 md:-mx-6 -mt-4 md:-mt-6" onClick={() => { setShowListMenu(false); setShowMoreMenu(false); }}>
       {/* Cinematic Hero — NO overflow-hidden so dropdowns render freely */}
-      <div className="relative mb-0" style={{ minHeight: '520px' }}>
+      <div className="relative mb-0 min-h-[320px] sm:min-h-[420px] lg:min-h-[520px]">
         {backdrop && (
           <img src={backdrop} alt="" className="absolute inset-0 w-full h-full object-cover" />
         )}
         <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/50 to-transparent" />
         <div className="absolute inset-0 bg-gradient-to-t from-surface dark:from-surface-dark via-transparent to-transparent" />
 
-        <div className="relative flex gap-8 2xl:gap-12 min-h-[520px] 2xl:min-h-[640px] items-end px-10 2xl:px-16 pb-10 2xl:pb-14">
+        <div className="relative flex gap-4 sm:gap-6 lg:gap-8 2xl:gap-12 min-h-[320px] sm:min-h-[420px] lg:min-h-[520px] 2xl:min-h-[640px] items-end px-4 sm:px-6 lg:px-10 2xl:px-16 pb-6 sm:pb-8 lg:pb-10 2xl:pb-14">
           {poster && (
             <img src={poster} alt={media.title} className="w-52 2xl:w-72 rounded-xl shadow-2xl hidden sm:block" />
           )}
