@@ -23,8 +23,12 @@ A self-hosted media streaming server built for S3-compatible storage. Think Jell
 ## Quick Start
 
 ```bash
-# Clone and start with Docker Compose
-docker compose up -d
+# Clone and configure
+cp .env.example .env
+# Edit .env with your JWT secret and (optionally) TMDB API key
+
+# Start with Docker Compose
+docker compose -f docker-compose.local.yml up -d
 
 # Open http://localhost:8080
 # Complete the setup wizard (admin user → S3 connection → library)

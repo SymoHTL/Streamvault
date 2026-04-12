@@ -7,8 +7,8 @@ services:
     environment:
       - DataDirectory=/data
       - Redis__ConnectionString=redis:6379
-      - Jwt__Secret=mvRsIkrLe0nFlutjEynz1pvvU9RvVP9xWnBnJGsq9SHbhdWMSEugN8WBzn39
-      - Tmdb__ApiKey=693ef07f905cf6f8fb4146e8b2dbb621
+      - Jwt__Secret=${JWT_SECRET}
+      - Tmdb__ApiKey=${TMDB_API_KEY}
       - Transcoding__FfmpegPath=/usr/bin/ffmpeg
       - CorsOrigins__0=https://stream.symo.dev
     labels:

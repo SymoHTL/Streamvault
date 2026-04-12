@@ -30,6 +30,9 @@ bld/
 # JetBrains Rider
 .idea/
 
+# VS Code
+.vscode/
+
 # Node / React
 node_modules/
 dist/
@@ -41,7 +44,6 @@ build/
 .env
 .env.*
 !.env.example
-appsettings.Development.json
 appsettings.Local.json
 
 # OS files

@@ -96,7 +96,7 @@ function persistState(sessions: AccountSession[], activeUserId: string | null, p
 
 const initial = migrateFromLegacy();
 
-export const useAuthStore = create<AuthState>()((set, get) => ({
+export const useAuthStore = create<AuthState>()((set, _get) => ({
   sessions: initial.sessions,
   activeUserId: initial.activeUserId,
   profile: initial.profile,

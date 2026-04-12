@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import { QRCodeSVG } from 'qrcode.react';
-import { Tv, Keyboard } from 'lucide-react';
+import { Tv } from 'lucide-react';
 import type { DeviceCodeResponse } from '../types';
 
 export default function LoginPage() {
@@ -24,6 +24,15 @@ export default function LoginPage() {
   const [deviceCode, setDeviceCode] = useState<DeviceCodeResponse | null>(null);
   const [qrStatus, setQrStatus] = useState<'loading' | 'pending' | 'expired' | 'authorized'>('loading');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Responsive QR code size for TV displays
+  const getQrSize = () => window.innerWidth >= 2500 ? 400 : window.innerWidth >= 1536 ? 320 : 200;
+  const [qrSize, setQrSize] = useState(getQrSize);
+  useEffect(() => {
+    const onResize = () => setQrSize(getQrSize());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     // Check if setup is needed
@@ -118,8 +127,8 @@ export default function LoginPage() {
             {qrStatus === 'pending' && deviceCode && (
               <>
                 <div className="flex justify-center">
-                  <div className="bg-white p-4 rounded-lg">
-                    <QRCodeSVG value={deviceCode.qrUrl} size={200} level="M" />
+                  <div className="bg-white p-4 2xl:p-6 rounded-lg">
+                    <QRCodeSVG value={deviceCode.qrUrl} size={qrSize} level="M" />
                   </div>
                 </div>
                 <div>
