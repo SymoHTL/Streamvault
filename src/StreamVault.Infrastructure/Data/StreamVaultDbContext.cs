@@ -31,6 +31,7 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<CollectionItem> CollectionItems => Set<CollectionItem>();
     public DbSet<TranscodeProfile> TranscodeProfiles => Set<TranscodeProfile>();
     public DbSet<AudioTrack> AudioTracks => Set<AudioTrack>();
+    public DbSet<ChapterInfo> ChapterInfos => Set<ChapterInfo>();
     public DbSet<DeviceCode> DeviceCodes => Set<DeviceCode>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
@@ -114,6 +115,13 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
             .HasOne(at => at.MediaFile)
             .WithMany(mf => mf.AudioTracks)
             .HasForeignKey(at => at.MediaFileId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ChapterInfo -> MediaFile
+        modelBuilder.Entity<ChapterInfo>()
+            .HasOne(ch => ch.MediaFile)
+            .WithMany(mf => mf.Chapters)
+            .HasForeignKey(ch => ch.MediaFileId)
             .OnDelete(DeleteBehavior.Cascade);
 
         // WatchProgress unique per profile+mediafile

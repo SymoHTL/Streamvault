@@ -69,40 +69,40 @@ export default function SetupPage() {
     // Step 0: Admin account
     <div key="admin" className="space-y-4">
       <h3 className="text-lg font-semibold text-text dark:text-text-dark">{t('setup.adminAccount')}</h3>
-      <Input label="Username" value={form.adminUsername} onChange={(v) => update('adminUsername', v)} />
-      <Input label="Email" type="email" value={form.adminEmail} onChange={(v) => update('adminEmail', v)} />
-      <Input label="Password" type="password" value={form.adminPassword} onChange={(v) => update('adminPassword', v)} />
+      <Input label={t('auth.username')} value={form.adminUsername} onChange={(v) => update('adminUsername', v)} />
+      <Input label={t('settings.email')} type="email" value={form.adminEmail} onChange={(v) => update('adminEmail', v)} />
+      <Input label={t('auth.password')} type="password" value={form.adminPassword} onChange={(v) => update('adminPassword', v)} />
     </div>,
     // Step 1: S3 connection
     <div key="s3" className="space-y-4">
       <h3 className="text-lg font-semibold text-text dark:text-text-dark">{t('setup.s3Connection')}</h3>
-      <Input label="Connection Name" value={form.s3Name} onChange={(v) => update('s3Name', v)} placeholder="My S3" />
-      <Input label="Endpoint" value={form.s3Endpoint} onChange={(v) => update('s3Endpoint', v)} placeholder="https://s3.amazonaws.com" />
-      <Input label="Bucket" value={form.s3Bucket} onChange={(v) => update('s3Bucket', v)} />
-      <Input label="Access Key" value={form.s3AccessKey} onChange={(v) => update('s3AccessKey', v)} />
-      <Input label="Secret Key" type="password" value={form.s3SecretKey} onChange={(v) => update('s3SecretKey', v)} />
-      <Input label="Region" value={form.s3Region} onChange={(v) => update('s3Region', v)} />
+      <Input label={t('admin.connectionName')} value={form.s3Name} onChange={(v) => update('s3Name', v)} placeholder="My S3" />
+      <Input label={t('admin.endpoint')} value={form.s3Endpoint} onChange={(v) => update('s3Endpoint', v)} placeholder="https://s3.amazonaws.com" />
+      <Input label={t('admin.bucket')} value={form.s3Bucket} onChange={(v) => update('s3Bucket', v)} />
+      <Input label={t('admin.accessKey')} value={form.s3AccessKey} onChange={(v) => update('s3AccessKey', v)} />
+      <Input label={t('admin.secretKey')} type="password" value={form.s3SecretKey} onChange={(v) => update('s3SecretKey', v)} />
+      <Input label={t('admin.region')} value={form.s3Region} onChange={(v) => update('s3Region', v)} />
       <label className="flex items-center gap-2 text-sm text-text dark:text-text-dark">
         <input type="checkbox" checked={form.s3ForcePathStyle} onChange={(e) => update('s3ForcePathStyle', e.target.checked)} />
-        Force Path Style
+        {t('admin.forcePathStyle')}
       </label>
     </div>,
     // Step 2: Library
     <div key="library" className="space-y-4">
       <h3 className="text-lg font-semibold text-text dark:text-text-dark">{t('setup.library')}</h3>
-      <Input label="Library Name" value={form.libraryName} onChange={(v) => update('libraryName', v)} placeholder="Movies" />
+      <Input label={t('admin.libraryName')} value={form.libraryName} onChange={(v) => update('libraryName', v)} placeholder={t('admin.movies')} />
       <div>
-        <label className="block text-sm font-medium mb-1 text-muted dark:text-muted-dark">Type</label>
+        <label className="block text-sm font-medium mb-1 text-muted dark:text-muted-dark">{t('setup.type')}</label>
         <select
           value={form.libraryType}
           onChange={(e) => update('libraryType', e.target.value)}
           className="w-full px-3 py-2 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text dark:text-text-dark"
         >
-          <option value="Movie">Movies</option>
-          <option value="TvShow">TV Shows</option>
+          <option value="Movie">{t('admin.movies')}</option>
+          <option value="TvShow">{t('admin.tvShows')}</option>
         </select>
       </div>
-      <Input label="TMDB API Key (optional)" value={form.tmdbApiKey} onChange={(v) => update('tmdbApiKey', v)} />
+      <Input label={t('setup.tmdbKey')} value={form.tmdbApiKey} onChange={(v) => update('tmdbApiKey', v)} />
     </div>,
   ];
 
@@ -130,14 +130,14 @@ export default function SetupPage() {
               disabled={step === 0}
               className="px-4 py-2 rounded-lg text-sm font-medium text-muted hover:text-text dark:hover:text-text-dark disabled:opacity-30"
             >
-              Back
+              {t('setup.back')}
             </button>
             {step < steps.length - 1 ? (
               <button
                 onClick={() => setStep((s) => s + 1)}
                 className="px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-sm font-medium"
               >
-                Next
+                {t('setup.next')}
               </button>
             ) : (
               <button

@@ -87,7 +87,7 @@ public class AdminController : BaseController
     }
 
     [HttpPut("s3-connections/{id:guid}")]
-    public async Task<ActionResult<S3ConnectionResponse>> UpdateS3Connection(Guid id, [FromBody] S3ConnectionRequest request)
+    public async Task<ActionResult<S3ConnectionResponse>> UpdateS3Connection(Guid id, [FromBody] S3ConnectionUpdateRequest request)
     {
         var connection = await _db.S3Connections.FindAsync(id);
         if (connection == null) return NotFound();
@@ -113,13 +113,17 @@ public class AdminController : BaseController
     }
 
     [HttpDelete("s3-connections/{id:guid}")]
-    public async Task<IActionResult> DeleteS3Connection(Guid id)
+    public async Task<IActionResult> DeleteS3Connection(Guid id, [FromQuery] bool force = false)
     {
         var connection = await _db.S3Connections.FindAsync(id);
         if (connection == null) return NotFound();
 
-        var hasLibraries = await _db.Libraries.AnyAsync(l => l.S3ConnectionId == id);
-        if (hasLibraries) return BadRequest(new { error = "Cannot delete S3 connection that is in use by libraries" });
+        var libraries = await _db.Libraries.Where(l => l.S3ConnectionId == id).ToListAsync();
+        if (libraries.Count > 0 && !force)
+            return BadRequest(new { error = "Cannot delete S3 connection that is in use by libraries. Use force delete to remove libraries as well." });
+
+        if (libraries.Count > 0)
+            _db.Libraries.RemoveRange(libraries);
 
         _db.S3Connections.Remove(connection);
         await _db.SaveChangesAsync();

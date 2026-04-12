@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using StreamVault.Core.DTOs;
 using StreamVault.Core.Entities;
 using StreamVault.Core.Interfaces;
@@ -132,5 +133,35 @@ public class ProfilesController : BaseController
             new ProfileResponse(profile.Id, profile.Name, profile.AvatarUrl, profile.PinHash != null, profile.IsDefault),
             null
         ));
+    }
+
+    [HttpGet("preferences")]
+    public async Task<IActionResult> GetPreferences()
+    {
+        var profileId = GetProfileId();
+        var profile = await _db.Profiles.FindAsync(profileId);
+        if (profile == null) return NotFound();
+
+        if (string.IsNullOrEmpty(profile.PreferencesJson))
+            return Ok(new ProfilePreferencesDto(null, null, null, null, null, null, null, null));
+
+        var prefs = JsonSerializer.Deserialize<ProfilePreferencesDto>(profile.PreferencesJson,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        return Ok(prefs);
+    }
+
+    [HttpPut("preferences")]
+    public async Task<IActionResult> UpdatePreferences([FromBody] ProfilePreferencesDto request)
+    {
+        var profileId = GetProfileId();
+        var profile = await _db.Profiles.FindAsync(profileId);
+        if (profile == null) return NotFound();
+
+        profile.PreferencesJson = JsonSerializer.Serialize(request,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        profile.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(request);
     }
 }

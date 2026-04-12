@@ -41,7 +41,7 @@ export default function LibraryPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-text dark:text-text-dark">{library?.name || 'Library'}</h1>
+          <h1 className="text-2xl font-bold text-text dark:text-text-dark">{library?.name || t('nav.libraries')}</h1>
           {data && <p className="text-sm text-muted dark:text-muted-dark">{data.totalCount} {t('library.items')}</p>}
         </div>
       </div>
@@ -49,7 +49,7 @@ export default function LibraryPage() {
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
         <input
-          placeholder="Search..."
+          placeholder={t('library.search')}
           value={search}
           onChange={(e) => updateParam('search', e.target.value)}
           className="px-3 py-2 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text dark:text-text-dark text-sm w-48 focus:ring-2 focus:ring-primary outline-none"
@@ -59,10 +59,10 @@ export default function LibraryPage() {
           onChange={(e) => updateParam('sort', e.target.value)}
           className="px-3 py-2 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text dark:text-text-dark text-sm"
         >
-          <option value="title">Title</option>
-          <option value="year">Year</option>
-          <option value="rating">Rating</option>
-          <option value="added">Recently Added</option>
+          <option value="title">{t('library.title')}</option>
+          <option value="year">{t('library.year')}</option>
+          <option value="rating">{t('library.rating')}</option>
+          <option value="added">{t('library.recentlyAdded')}</option>
         </select>
       </div>
 
@@ -91,7 +91,7 @@ export default function LibraryPage() {
             <ChevronLeft size={18} />
           </button>
           <span className="text-sm text-muted dark:text-muted-dark">
-            Page {page} of {totalPages}
+            {t('library.page', { current: page, total: totalPages })}
           </span>
           <button
             onClick={() => updateParam('page', String(page + 1))}

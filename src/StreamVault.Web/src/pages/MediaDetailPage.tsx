@@ -5,27 +5,15 @@ import { useRef, useState } from 'react';
 import { api } from '../api/client';
 import { Play, Star, Heart, Clock, List, ChevronDown, ChevronLeft, ChevronRight, FolderPlus, Info, Languages, Subtitles, MoreHorizontal } from 'lucide-react';
 import type { TvShowDetailResponse, MediaListStatus, MediaFileResponse, AudioTrackInfo, SubtitleResponse, PersonResponse } from '../types';
+import i18n from '../i18n';
 
-const LANG_NAMES: Record<string, string> = {
-  eng: 'English', deu: 'German', ger: 'German', fra: 'French', fre: 'French',
-  spa: 'Spanish', ita: 'Italian', por: 'Portuguese', rus: 'Russian', jpn: 'Japanese',
-  kor: 'Korean', zho: 'Chinese', chi: 'Chinese', hin: 'Hindi', ara: 'Arabic',
-  tur: 'Turkish', pol: 'Polish', nld: 'Dutch', dut: 'Dutch', swe: 'Swedish',
-  nor: 'Norwegian', dan: 'Danish', fin: 'Finnish', ces: 'Czech', cze: 'Czech',
-  hun: 'Hungarian', ron: 'Romanian', rum: 'Romanian', tha: 'Thai', vie: 'Vietnamese',
-  und: 'Unknown',
-};
 function langName(code: string): string {
-  return LANG_NAMES[code.toLowerCase()] || code;
+  const key = `lang.${code.toLowerCase()}`;
+  const result = i18n.t(key);
+  return result === key ? code : result;
 }
 
-const LIST_STATUSES: { value: MediaListStatus; label: string }[] = [
-  { value: 'Watching', label: 'Watching' },
-  { value: 'Planned', label: 'Planned' },
-  { value: 'Completed', label: 'Completed' },
-  { value: 'OnHold', label: 'On Hold' },
-  { value: 'Dropped', label: 'Dropped' },
-];
+const LIST_STATUS_VALUES: MediaListStatus[] = ['Watching', 'Planned', 'Completed', 'OnHold', 'Dropped'];
 
 export default function MediaDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -100,7 +88,7 @@ export default function MediaDetailPage() {
       </div>
     </div>
   );
-  if (!media) return <div className="text-muted dark:text-muted-dark">Not found</div>;
+  if (!media) return <div className="text-muted dark:text-muted-dark">{t('media.notFound')}</div>;
 
   const backdrop = media.images.find((i) => i.type === 'Backdrop')?.url;
   const poster = media.images.find((i) => i.type === 'Poster')?.url;
@@ -209,10 +197,10 @@ export default function MediaDetailPage() {
                     ? 'bg-danger/20 text-danger backdrop-blur-sm'
                     : 'bg-white/15 text-white hover:bg-white/25 backdrop-blur-sm'
                 }`}
-                title={media.isInWatchlist ? 'Remove from Watchlist' : 'Save to Watchlist'}
+                title={media.isInWatchlist ? t('media.removeFromWatchlist') : t('media.addToWatchlist')}
               >
                 <Heart size={20} className={media.isInWatchlist ? 'fill-danger' : ''} />
-                {media.isInWatchlist ? 'Saved' : 'Watchlist'}
+                {media.isInWatchlist ? t('media.saved') : t('media.watchlist')}
               </button>
 
               {/* List status dropdown — opens upward to avoid clipping */}
@@ -226,20 +214,20 @@ export default function MediaDetailPage() {
                   }`}
                 >
                   <List size={20} />
-                  {listEntry ? listEntry.status : 'Add to List'}
+                  {listEntry ? t(`listStatus.${listEntry.status}`) : t('media.addToList')}
                   <ChevronDown size={14} />
                 </button>
                 {showListMenu && (
                   <div className="absolute bottom-full mb-2 left-0 z-50 w-52 rounded-xl bg-surface dark:bg-surface-dark border border-border dark:border-border-dark shadow-2xl py-1.5">
-                    {LIST_STATUSES.map((s) => (
+                    {LIST_STATUS_VALUES.map((s) => (
                       <button
-                        key={s.value}
-                        onClick={() => listMutation.mutate(s.value)}
+                        key={s}
+                        onClick={() => listMutation.mutate(s)}
                         className={`w-full text-left px-4 py-2.5 text-sm hover:bg-border dark:hover:bg-border-dark transition-colors cursor-pointer ${
-                          listEntry?.status === s.value ? 'text-primary font-medium' : 'text-text dark:text-text-dark'
+                          listEntry?.status === s ? 'text-primary font-medium' : 'text-text dark:text-text-dark'
                         }`}
                       >
-                        {s.label}
+                        {t(`listStatus.${s}`)}
                       </button>
                     ))}
                     {listEntry && (
@@ -249,7 +237,7 @@ export default function MediaDetailPage() {
                           onClick={() => removeListMutation.mutate()}
                           className="w-full text-left px-4 py-2.5 text-sm text-danger hover:bg-danger/10 transition-colors cursor-pointer"
                         >
-                          Remove from List
+                          {t('media.removeFromList')}
                         </button>
                       </>
                     )}
@@ -276,15 +264,15 @@ export default function MediaDetailPage() {
                         <FolderPlus size={16} /> {mediaCollections[0].name}
                       </button>
                     )}
-                    {LIST_STATUSES.map((s) => (
+                    {LIST_STATUS_VALUES.map((s) => (
                       <button
-                        key={s.value}
-                        onClick={() => listMutation.mutate(s.value)}
+                        key={s}
+                        onClick={() => listMutation.mutate(s)}
                         className={`w-full text-left px-4 py-2.5 text-sm hover:bg-border dark:hover:bg-border-dark transition-colors cursor-pointer flex items-center gap-2 ${
-                          listEntry?.status === s.value ? 'text-primary font-medium' : 'text-text dark:text-text-dark'
+                          listEntry?.status === s ? 'text-primary font-medium' : 'text-text dark:text-text-dark'
                         }`}
                       >
-                        <List size={16} /> Mark as {s.label}
+                        <List size={16} /> {t('media.markAs')} {t(`listStatus.${s}`)}
                       </button>
                     ))}
                   </div>
@@ -334,25 +322,26 @@ function AudioSubtitleSelector({ audioTracks, subtitles, selectedAudio, selected
   onAudioChange: (v: number | undefined) => void;
   onSubtitleChange: (v: string | undefined) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <section className="mb-8 flex flex-wrap gap-6">
       {audioTracks.length > 1 && (
         <div>
           <label className="flex items-center gap-2 text-sm font-medium text-text dark:text-text-dark mb-2">
-            <Languages size={16} /> Audio Track
+            <Languages size={16} /> {t('media.audioTrack')}
           </label>
           <select
             value={selectedAudio ?? ''}
             onChange={(e) => onAudioChange(e.target.value ? Number(e.target.value) : undefined)}
             className="px-4 py-2.5 rounded-lg text-sm bg-surface-secondary dark:bg-surface-secondary-dark text-text dark:text-text-dark border border-border dark:border-border-dark focus:ring-2 focus:ring-primary outline-none min-w-[200px]"
           >
-            <option value="">Default</option>
-            {audioTracks.map((t) => {
-              const lang = langName(t.language);
-              const chLabel = t.channels === 6 ? '5.1' : t.channels === 8 ? '7.1' : `${t.channels}ch`;
+            <option value="">{t('media.default')}</option>
+            {audioTracks.map((track) => {
+              const lang = langName(track.language);
+              const chLabel = track.channels === 6 ? '5.1' : track.channels === 8 ? '7.1' : `${track.channels}ch`;
               return (
-                <option key={t.streamIndex} value={t.streamIndex}>
-                  {t.title || lang} — {t.codec} · {chLabel}
+                <option key={track.streamIndex} value={track.streamIndex}>
+                  {track.title || lang} — {track.codec} · {chLabel}
                 </option>
               );
             })}
@@ -362,17 +351,17 @@ function AudioSubtitleSelector({ audioTracks, subtitles, selectedAudio, selected
       {subtitles.length > 0 && (
         <div>
           <label className="flex items-center gap-2 text-sm font-medium text-text dark:text-text-dark mb-2">
-            <Subtitles size={16} /> Subtitles
+            <Subtitles size={16} /> {t('media.subtitles')}
           </label>
           <select
             value={selectedSubtitle ?? ''}
             onChange={(e) => onSubtitleChange(e.target.value || undefined)}
             className="px-4 py-2.5 rounded-lg text-sm bg-surface-secondary dark:bg-surface-secondary-dark text-text dark:text-text-dark border border-border dark:border-border-dark focus:ring-2 focus:ring-primary outline-none min-w-[200px]"
           >
-            <option value="">Off</option>
+            <option value="">{t('media.off')}</option>
             {subtitles.map((s) => (
               <option key={s.id} value={s.id}>
-                {langName(s.language)}{s.isForced ? ' (Forced)' : ''} — {s.format}
+                {langName(s.language)}{s.isForced ? ` (${i18n.t('media.forced')})` : ''} — {s.format}
               </option>
             ))}
           </select>
@@ -456,6 +445,7 @@ function formatDuration(seconds: number | null): string | null {
 }
 
 function MovieFileInfo({ file }: { file: MediaFileResponse }) {
+  const { t } = useTranslation();
   const [showTechnical, setShowTechnical] = useState(false);
   const quality = formatQuality(file.resolution);
   const duration = formatDuration(file.durationSeconds);
@@ -475,7 +465,7 @@ function MovieFileInfo({ file }: { file: MediaFileResponse }) {
         className="flex items-center gap-1.5 text-xs text-muted dark:text-muted-dark hover:text-text dark:hover:text-text-dark transition-colors"
       >
         <Info size={14} />
-        Technical Details
+        {t('media.technicalDetails')}
         <ChevronDown size={12} className={`transition-transform ${showTechnical ? 'rotate-180' : ''}`} />
       </button>
       {showTechnical && (
@@ -584,7 +574,7 @@ function TvShowSeasons({ data }: { data: TvShowDetailResponse }) {
               const watchedCount = season.episodes.filter(ep => ep.progress?.completed).length;
               return (
                 <option key={season.id} value={season.id}>
-                  {season.name || `Season ${season.seasonNumber}`} ({season.episodes.length} eps{watchedCount > 0 ? `, ${watchedCount} watched` : ''})
+                  {season.name || `${i18n.t('media.season')} ${season.seasonNumber}`} ({season.episodes.length} {i18n.t('media.episodes')}{watchedCount > 0 ? `, ${watchedCount} ${i18n.t('media.watched')}` : ''})
                 </option>
               );
             })}
@@ -604,8 +594,11 @@ function TvShowSeasons({ data }: { data: TvShowDetailResponse }) {
               return (
                 <div
                   key={ep.id}
-                  className="flex items-center gap-4 px-5 py-4 hover:bg-surface-secondary/50 dark:hover:bg-surface-secondary-dark/50 cursor-pointer transition-colors"
+                  role="button"
+                  tabIndex={0}
+                  className="flex items-center gap-4 px-5 py-4 hover:bg-surface-secondary/50 dark:hover:bg-surface-secondary-dark/50 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
                   onClick={() => mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`); } }}
                 >
                   <span className="text-base font-medium text-muted dark:text-muted-dark w-8 text-center shrink-0">
                     {ep.episodeNumber}

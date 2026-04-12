@@ -5,6 +5,7 @@ import { useThemeStore } from '../stores/themeStore';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { Home, Search, Settings, Shield, LogOut, Sun, Moon, Library, List, FolderOpen, UserCircle } from 'lucide-react';
+import { useSpatialNav } from '../hooks/useSpatialNav';
 
 export default function Layout() {
   const { t } = useTranslation();
@@ -17,6 +18,8 @@ export default function Layout() {
     queryKey: ['libraries'],
     queryFn: api.libraries.list,
   });
+
+  useSpatialNav();
 
   const handleLogout = () => {
     api.auth.logout().catch(() => {});
@@ -36,16 +39,16 @@ export default function Layout() {
           <NavLink to="/" icon={<Home size={18} className="2xl:!w-6 2xl:!h-6" />} label={t('nav.home')} active={location.pathname === '/'} />
           <NavLink to="/search" icon={<Search size={18} className="2xl:!w-6 2xl:!h-6" />} label={t('nav.search')} active={location.pathname === '/search'} />
           <NavLink to="/lists" icon={<List size={18} className="2xl:!w-6 2xl:!h-6" />} label={t('nav.lists', 'My Lists')} active={location.pathname === '/lists'} />
-          <NavLink to="/collections" icon={<FolderOpen size={18} className="2xl:!w-6 2xl:!h-6" />} label="Collections" active={location.pathname === '/collections'} />
+          <NavLink to="/collections" icon={<FolderOpen size={18} className="2xl:!w-6 2xl:!h-6" />} label={t('nav.collections')} active={location.pathname === '/collections'} />
 
           {libraries && libraries.length > 0 && (
-            <div className="pt-4 pb-1 px-2.5 text-[11px] 2xl:text-sm font-semibold uppercase tracking-wider text-muted dark:text-muted-dark">Libraries</div>
+            <div className="pt-4 pb-1 px-2.5 text-[11px] 2xl:text-sm font-semibold uppercase tracking-wider text-muted dark:text-muted-dark">{t('nav.libraries')}</div>
           )}
           {libraries?.map((lib) => (
             <NavLink key={lib.id} to={`/library/${lib.id}`} icon={<Library size={18} className="2xl:!w-6 2xl:!h-6" />} label={lib.name} active={location.pathname === `/library/${lib.id}`} />
           ))}
 
-          <div className="pt-4 pb-1 px-2.5 text-[11px] 2xl:text-sm font-semibold uppercase tracking-wider text-muted dark:text-muted-dark">Account</div>
+          <div className="pt-4 pb-1 px-2.5 text-[11px] 2xl:text-sm font-semibold uppercase tracking-wider text-muted dark:text-muted-dark">{t('nav.account')}</div>
           <NavLink to="/settings" icon={<Settings size={18} className="2xl:!w-6 2xl:!h-6" />} label={t('nav.settings')} active={location.pathname === '/settings'} />
           {user?.role === 'Admin' && (
             <NavLink to="/admin" icon={<Shield size={18} className="2xl:!w-6 2xl:!h-6" />} label={t('nav.admin')} active={location.pathname.startsWith('/admin')} />
@@ -55,16 +58,16 @@ export default function Layout() {
         <div className="p-2.5 2xl:p-4 border-t border-border dark:border-border-dark space-y-1 2xl:space-y-2">
           <button
             onClick={() => navigate('/profiles')}
-            className="flex items-center gap-2.5 2xl:gap-4 w-full px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base hover:bg-border dark:hover:bg-border-dark text-text dark:text-text-dark transition-colors"
+            className="flex items-center gap-2.5 2xl:gap-4 w-full px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base hover:bg-border dark:hover:bg-border-dark text-text dark:text-text-dark transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <UserCircle size={18} />
             <span className="truncate">{profile?.name ?? user?.username}</span>
           </button>
-          <button onClick={toggle} className="flex items-center gap-2.5 2xl:gap-4 w-full px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base hover:bg-border dark:hover:bg-border-dark text-text dark:text-text-dark transition-colors">
+          <button onClick={toggle} className="flex items-center gap-2.5 2xl:gap-4 w-full px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base hover:bg-border dark:hover:bg-border-dark text-text dark:text-text-dark transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            {theme === 'dark' ? 'Light' : 'Dark'} Mode
+            {theme === 'dark' ? t('common.lightMode') : t('common.darkMode')} {t('common.mode')}
           </button>
-          <button onClick={handleLogout} className="flex items-center gap-2.5 2xl:gap-4 w-full px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base hover:bg-danger/10 text-danger transition-colors">
+          <button onClick={handleLogout} className="flex items-center gap-2.5 2xl:gap-4 w-full px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base hover:bg-danger/10 text-danger transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
             <LogOut size={18} /> {t('nav.logout')}
           </button>
         </div>
@@ -84,7 +87,7 @@ function NavLink({ to, icon, label, active }: { to: string; icon: React.ReactNod
   return (
     <Link
       to={to}
-      className={`flex items-center gap-2.5 2xl:gap-4 px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base transition-colors ${
+      className={`flex items-center gap-2.5 2xl:gap-4 px-3 py-2 2xl:px-4 2xl:py-3 rounded-lg text-sm 2xl:text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         active
           ? 'bg-primary/10 text-primary font-medium'
           : 'text-text dark:text-text-dark hover:bg-border dark:hover:bg-border-dark'

@@ -6,6 +6,7 @@ public class Profile : BaseEntity
     public string? AvatarUrl { get; set; }
     public string? PinHash { get; set; }
     public bool IsDefault { get; set; }
+    public string? PreferencesJson { get; set; }
 
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;

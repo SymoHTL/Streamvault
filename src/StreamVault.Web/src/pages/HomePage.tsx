@@ -58,13 +58,13 @@ export default function HomePage() {
               <div className="flex items-center gap-3 2xl:gap-4">
                 <Link
                   to={`/media/${heroItem.id}`}
-                  className="inline-flex items-center gap-2 px-6 py-3 2xl:px-10 2xl:py-4 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors text-base 2xl:text-xl"
+                  className="inline-flex items-center gap-2 px-6 py-3 2xl:px-10 2xl:py-4 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors text-base 2xl:text-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-black"
                 >
                   <Play size={20} fill="currentColor" className="2xl:!w-7 2xl:!h-7" /> {t('media.play')}
                 </Link>
                 <Link
                   to={`/media/${heroItem.id}`}
-                  className="inline-flex items-center gap-2 px-6 py-3 2xl:px-10 2xl:py-4 bg-white/20 hover:bg-white/30 text-white rounded-lg font-semibold transition-colors text-base 2xl:text-xl backdrop-blur-sm"
+                  className="inline-flex items-center gap-2 px-6 py-3 2xl:px-10 2xl:py-4 bg-white/20 hover:bg-white/30 text-white rounded-lg font-semibold transition-colors text-base 2xl:text-xl backdrop-blur-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <Info size={20} className="2xl:!w-7 2xl:!h-7" /> {t('media.details', 'More Info')}
                 </Link>

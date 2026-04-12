@@ -44,7 +44,7 @@ export default function MediaCard({ item, showEpisodeInfo }: Props) {
 
   return (
     <div className="group relative rounded-lg overflow-visible bg-surface-secondary dark:bg-surface-secondary-dark cursor-pointer">
-      <Link to={linkTo} className="block rounded-lg overflow-hidden">
+      <Link to={linkTo} className="block rounded-lg overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-surface-secondary dark:focus-visible:ring-offset-surface-secondary-dark">
         <div className="aspect-[2/3] relative overflow-hidden bg-border dark:bg-border-dark">
           {item.posterPath ? (
             <img

@@ -122,6 +122,16 @@ public record S3ConnectionRequest(
     bool ForcePathStyle = true
 );
 
+public record S3ConnectionUpdateRequest(
+    [Required] string Name,
+    [Required] string Endpoint,
+    [Required] string Bucket,
+    [Required] string AccessKey,
+    string? SecretKey,
+    string Region = "us-east-1",
+    bool ForcePathStyle = true
+);
+
 public record S3ConnectionResponse(
     Guid Id,
     string Name,
@@ -399,4 +409,25 @@ public record IdentifyRequest(
 public record IdentifySearchRequest(
     [Required] string Query,
     int? Year
+);
+
+// === Profile Preferences ===
+public record ProfilePreferencesDto(
+    string? Language,
+    string? AudioLanguage,
+    string? SubtitleLanguage,
+    int? MaxBitrate,
+    string? SubtitleSize,
+    string? SubtitleFont,
+    string? SubtitleColor,
+    string? SubtitleBackground
+);
+
+// === Chapters ===
+public record ChapterResponse(
+    Guid Id,
+    string? Title,
+    double StartSeconds,
+    double EndSeconds,
+    string ChapterType
 );

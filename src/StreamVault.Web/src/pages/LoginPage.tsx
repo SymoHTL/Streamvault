@@ -112,7 +112,7 @@ export default function LoginPage() {
             </div>
 
             {qrStatus === 'loading' && (
-              <div className="text-muted dark:text-muted-dark py-12 2xl:py-16">Loading...</div>
+              <div className="text-muted dark:text-muted-dark py-12 2xl:py-16">{t('common.loading')}</div>
             )}
 
             {qrStatus === 'pending' && deviceCode && (

@@ -21,6 +21,9 @@ import type {
   ProfileResponse,
   DeviceCodeResponse,
   DeviceCodePollResponse,
+  ProfilePreferences,
+  ChapterResponse,
+  SubtitleResponse,
 } from '../types';
 
 const BASE = '';
@@ -144,6 +147,9 @@ export const api = {
     delete: (id: string) => request<void>(`/api/profiles/${id}`, { method: 'DELETE' }),
     select: (profileId: string, pin?: string) =>
       request<AuthResponse>(`/api/profiles/${profileId}/select`, { method: 'POST', body: JSON.stringify({ pin }) }),
+    getPreferences: () => request<ProfilePreferences>('/api/profiles/preferences'),
+    updatePreferences: (prefs: Partial<ProfilePreferences>) =>
+      request<ProfilePreferences>('/api/profiles/preferences', { method: 'PUT', body: JSON.stringify(prefs) }),
   },
 
   setup: {
@@ -177,7 +183,7 @@ export const api = {
   },
 
   stream: {
-    getDirectUrl: (mediaFileId: string) => request<{ url: string; container: string; durationSeconds: number | null; videoCodec: string | null; audioCodec: string | null; resolution: string | null }>(`/api/stream/${mediaFileId}/direct`),
+    getDirectUrl: (mediaFileId: string) => request<{ url: string; container: string; durationSeconds: number | null; videoCodec: string | null; audioCodec: string | null; resolution: string | null; subtitles?: SubtitleResponse[] }>(`/api/stream/${mediaFileId}/direct`),
     proxyUrl: (mediaFileId: string) => `/api/stream/${mediaFileId}/proxy`,
     remuxUrl: (mediaFileId: string, start?: number, audioTrack?: number) => {
       const params = new URLSearchParams();
@@ -188,6 +194,7 @@ export const api = {
     },
     subtitleUrl: (mediaFileId: string, subtitleId: string) => `/api/stream/${mediaFileId}/subtitles/${subtitleId}`,
     audioTracks: (mediaFileId: string) => request<AudioTrackInfo[]>(`/api/stream/${mediaFileId}/audio-tracks`),
+    chapters: (mediaFileId: string) => request<ChapterResponse[]>(`/api/stream/${mediaFileId}/chapters`),
   },
 
   progress: {
@@ -241,14 +248,22 @@ export const api = {
       list: () => request<S3ConnectionResponse[]>('/api/admin/s3-connections'),
       create: (data: Record<string, unknown>) =>
         request<S3ConnectionResponse>('/api/admin/s3-connections', { method: 'POST', body: JSON.stringify(data) }),
+      update: (id: string, data: Record<string, unknown>) =>
+        request<S3ConnectionResponse>(`/api/admin/s3-connections/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
       test: (id: string) => request<{ status: string }>(`/api/admin/s3-connections/${id}/test`, { method: 'POST' }),
-      delete: (id: string) => request<void>(`/api/admin/s3-connections/${id}`, { method: 'DELETE' }),
+      delete: (id: string, force = false) => request<void>(`/api/admin/s3-connections/${id}?force=${force}`, { method: 'DELETE' }),
     },
     users: {
       list: () => request<UserResponse[]>('/api/users'),
       create: (data: Record<string, unknown>) =>
         request<UserResponse>('/api/users', { method: 'POST', body: JSON.stringify(data) }),
+      update: (id: string, data: Record<string, unknown>) =>
+        request<UserResponse>(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
       delete: (id: string) => request<void>(`/api/users/${id}`, { method: 'DELETE' }),
+    },
+    libraries: {
+      update: (id: string, data: Record<string, unknown>) =>
+        request<LibraryResponse>(`/api/libraries/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     },
   },
 };

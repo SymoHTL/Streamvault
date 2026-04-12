@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StreamVault.Core.Configuration;
+using StreamVault.Core.DTOs;
 using StreamVault.Core.Interfaces;
 using StreamVault.Infrastructure.Data;
 
@@ -35,6 +36,7 @@ public class StreamController : BaseController
     public async Task<IActionResult> DirectPlay(Guid mediaFileId)
     {
         var mediaFile = await _db.MediaFiles
+            .Include(mf => mf.Subtitles)
             .Include(mf => mf.Episode).ThenInclude(e => e!.Season).ThenInclude(s => s.MediaItem).ThenInclude(mi => mi.Library)
             .Include(mf => mf.MediaItem).ThenInclude(mi => mi!.Library)
             .FirstOrDefaultAsync(mf => mf.Id == mediaFileId);
@@ -52,7 +54,8 @@ public class StreamController : BaseController
             durationSeconds = mediaFile.DurationSeconds,
             videoCodec = mediaFile.VideoCodec,
             audioCodec = mediaFile.AudioCodec,
-            resolution = mediaFile.Resolution
+            resolution = mediaFile.Resolution,
+            subtitles = mediaFile.Subtitles.Select(s => new SubtitleResponse(s.Id, s.Language, s.Format.ToString(), s.IsExternal, s.IsForced)).ToList()
         });
     }
 
@@ -401,5 +404,78 @@ public class StreamController : BaseController
         }
 
         return NotFound();
+    }
+
+    [HttpGet("{mediaFileId:guid}/chapters")]
+    public async Task<IActionResult> GetChapters(Guid mediaFileId)
+    {
+        var mediaFile = await _db.MediaFiles
+            .Include(mf => mf.Chapters)
+            .Include(mf => mf.Episode).ThenInclude(e => e!.Season).ThenInclude(s => s.MediaItem).ThenInclude(mi => mi.Library)
+            .Include(mf => mf.MediaItem).ThenInclude(mi => mi!.Library)
+            .FirstOrDefaultAsync(mf => mf.Id == mediaFileId);
+
+        if (mediaFile == null) return NotFound();
+
+        // Return cached chapters if available
+        if (mediaFile.Chapters.Count > 0)
+        {
+            return Ok(mediaFile.Chapters
+                .OrderBy(c => c.StartSeconds)
+                .Select(c => new ChapterResponse(c.Id, c.Title, c.StartSeconds, c.EndSeconds, c.ChapterType))
+                .ToList());
+        }
+
+        // Probe the file for chapters
+        var library = mediaFile.MediaItem?.Library ?? mediaFile.Episode?.Season.MediaItem.Library;
+        if (library == null) return NotFound();
+
+        try
+        {
+            var presignedUrl = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromMinutes(5));
+            var probeResult = await _probe.ProbeAsync(presignedUrl);
+
+            if (probeResult.Chapters.Count == 0)
+                return Ok(Array.Empty<ChapterResponse>());
+
+            var introPatterns = new[] { "intro", "opening", "op" };
+            var recapPatterns = new[] { "recap", "previously" };
+            var creditsPatterns = new[] { "credits", "ending", "ed" };
+
+            foreach (var ch in probeResult.Chapters)
+            {
+                var titleLower = ch.Title?.ToLowerInvariant() ?? "";
+                var chapterType = introPatterns.Any(p => titleLower.Contains(p)) ? "intro"
+                    : recapPatterns.Any(p => titleLower.Contains(p)) ? "recap"
+                    : creditsPatterns.Any(p => titleLower.Contains(p)) ? "credits"
+                    : "other";
+
+                _db.ChapterInfos.Add(new Core.Entities.ChapterInfo
+                {
+                    Title = ch.Title,
+                    StartSeconds = ch.StartSeconds,
+                    EndSeconds = ch.EndSeconds,
+                    ChapterType = chapterType,
+                    MediaFileId = mediaFile.Id
+                });
+            }
+
+            await _db.SaveChangesAsync();
+
+            return Ok(probeResult.Chapters.Select(ch =>
+            {
+                var titleLower = ch.Title?.ToLowerInvariant() ?? "";
+                var chapterType = introPatterns.Any(p => titleLower.Contains(p)) ? "intro"
+                    : recapPatterns.Any(p => titleLower.Contains(p)) ? "recap"
+                    : creditsPatterns.Any(p => titleLower.Contains(p)) ? "credits"
+                    : "other";
+                return new ChapterResponse(Guid.NewGuid(), ch.Title, ch.StartSeconds, ch.EndSeconds, chapterType);
+            }).ToList());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to probe chapters for media file {MediaFileId}", mediaFileId);
+            return Ok(Array.Empty<ChapterResponse>());
+        }
     }
 }

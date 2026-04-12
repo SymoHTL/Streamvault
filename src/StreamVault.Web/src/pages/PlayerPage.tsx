@@ -1,8 +1,19 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
-import { ArrowLeft, Bug, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, Languages } from 'lucide-react';
-import type { AudioTrackInfo } from '../types';
+import { ArrowLeft, Bug, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, Languages, Cast, Subtitles } from 'lucide-react';
+import type { AudioTrackInfo, SubtitleResponse, ChapterResponse } from '../types';
+import { useChromecast } from '../hooks/useChromecast';
+import { usePreferencesStore } from '../stores/preferencesStore';
+import SubtitleOverlay from '../components/SubtitleOverlay';
+import i18n from '../i18n';
+
+function langName(code: string): string {
+  const key = `lang.${code.toLowerCase()}`;
+  const result = i18n.t(key);
+  return result === key ? code : result;
+}
 
 interface DebugInfo {
   currentTime: number;
@@ -42,24 +53,8 @@ function getBufferedRanges(video: HTMLVideoElement): string {
   return ranges.join(', ') || 'none';
 }
 
-const LANG_NAMES: Record<string, string> = {
-  eng: 'English', deu: 'German', ger: 'German', fra: 'French', fre: 'French',
-  spa: 'Spanish', ita: 'Italian', por: 'Portuguese', rus: 'Russian', jpn: 'Japanese',
-  kor: 'Korean', zho: 'Chinese', chi: 'Chinese', hin: 'Hindi', ara: 'Arabic',
-  tur: 'Turkish', pol: 'Polish', nld: 'Dutch', dut: 'Dutch', swe: 'Swedish',
-  nor: 'Norwegian', dan: 'Danish', fin: 'Finnish', ces: 'Czech', cze: 'Czech',
-  hun: 'Hungarian', ron: 'Romanian', rum: 'Romanian', tha: 'Thai', vie: 'Vietnamese',
-  ind: 'Indonesian', msa: 'Malay', may: 'Malay', heb: 'Hebrew', ell: 'Greek',
-  gre: 'Greek', ukr: 'Ukrainian', bul: 'Bulgarian', hrv: 'Croatian', srp: 'Serbian',
-  slk: 'Slovak', slo: 'Slovak', slv: 'Slovenian', cat: 'Catalan', eus: 'Basque',
-  glg: 'Galician', lat: 'Latin', und: 'Unknown',
-};
-
-function langName(code: string): string {
-  return LANG_NAMES[code.toLowerCase()] || code;
-}
-
 export default function PlayerPage() {
+  const { t } = useTranslation();
   const { mediaFileId } = useParams<{ mediaFileId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -91,17 +86,84 @@ export default function PlayerPage() {
   const seekOffsetRef = useRef(0);
   const knownDurationRef = useRef(0);
   const resumeSecondsRef = useRef(0);
+  const castMediaUrlRef = useRef('');
+  const castContentTypeRef = useRef('video/mp4');
+
+  // Subtitle state
+  const [subtitles, setSubtitles] = useState<SubtitleResponse[]>([]);
+  const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(null);
+  const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+
+  // Chapter / skip intro state
+  const [chapters, setChapters] = useState<ChapterResponse[]>([]);
+  const [activeSkipChapter, setActiveSkipChapter] = useState<ChapterResponse | null>(null);
+
+  const prefs = usePreferencesStore();
+  const chromecast = useChromecast();
+
+  // Load preferences
+  useEffect(() => { if (!prefs.loaded) prefs.load(); }, []);
+
+  // Track current chapter for skip intro/recap
+  useEffect(() => {
+    if (chapters.length === 0) { setActiveSkipChapter(null); return; }
+    const t = chromecast.isConnected ? chromecast.currentTime : currentTime;
+    const skip = chapters.find(
+      c => (c.chapterType === 'intro' || c.chapterType === 'recap') && t >= c.startSeconds && t < c.endSeconds
+    );
+    setActiveSkipChapter(skip ?? null);
+  }, [chapters, currentTime, chromecast.isConnected, chromecast.currentTime]);
+
+  // When a cast session connects, send the current media to the Chromecast
+  const isCastingRef = useRef(false);
+  useEffect(() => {
+    if (chromecast.isConnected && !isCastingRef.current && castMediaUrlRef.current) {
+      isCastingRef.current = true;
+      const video = videoRef.current;
+      const startTime = video ? video.currentTime + seekOffsetRef.current : 0;
+      // Pause local video
+      video?.pause();
+      chromecast.loadMedia(castMediaUrlRef.current, castContentTypeRef.current).then(() => {
+        if (startTime > 0) chromecast.seek(startTime);
+      }).catch(() => {});
+    } else if (!chromecast.isConnected && isCastingRef.current) {
+      isCastingRef.current = false;
+      // Resume local playback at the cast position
+      const video = videoRef.current;
+      if (video && chromecast.currentTime > 0) {
+        if (useRemux) {
+          // Reload remux at cast position
+          seekOffsetRef.current = chromecast.currentTime;
+          const token = localStorage.getItem('accessToken');
+          const remuxUrl = api.stream.remuxUrl(mediaFileId!, chromecast.currentTime, selectedAudioTrack);
+          const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
+          video.src = streamUrl;
+        } else {
+          video.currentTime = chromecast.currentTime;
+        }
+        video.play().catch(() => {});
+      }
+    }
+  }, [chromecast.isConnected]);
 
   const reportProgress = useCallback(async () => {
-    if (!videoRef.current || !mediaFileId) return;
-    const video = videoRef.current;
-    const actualTime = video.currentTime + seekOffsetRef.current;
-    if (isNaN(actualTime) || actualTime === 0) return;
+    if (!mediaFileId) return;
+    // Use cast time when casting, otherwise local video time
+    let actualTime: number;
+    if (isCastingRef.current && chromecast.isConnected) {
+      actualTime = chromecast.currentTime;
+      if (!actualTime || actualTime === 0) return;
+    } else {
+      if (!videoRef.current) return;
+      actualTime = videoRef.current.currentTime + seekOffsetRef.current;
+      if (isNaN(actualTime) || actualTime === 0) return;
+    }
     const positionTicks = Math.floor(actualTime * 10_000_000);
+    const video = videoRef.current;
     const effDur = knownDurationRef.current > 0
       ? knownDurationRef.current
-      : (isFinite(video.duration) && video.duration > 0) ? video.duration + seekOffsetRef.current : 0;
-    const completed = video.ended || (effDur > 0 && actualTime / effDur > 0.95);
+      : (video && isFinite(video.duration) && video.duration > 0) ? video.duration + seekOffsetRef.current : 0;
+    const completed = (video?.ended ?? false) || (effDur > 0 && actualTime / effDur > 0.95);
     try {
       await api.progress.update(mediaFileId, positionTicks, completed);
     } catch { /* ignore */ }
@@ -131,6 +193,15 @@ export default function PlayerPage() {
           if (info.durationSeconds) {
             setKnownDuration(info.durationSeconds);
             knownDurationRef.current = info.durationSeconds;
+          }
+          if (info.subtitles && info.subtitles.length > 0) {
+            setSubtitles(info.subtitles);
+            // Auto-select subtitle based on preference
+            const prefLang = prefs.subtitleLanguage;
+            if (prefLang) {
+              const match = info.subtitles.find(s => s.language === prefLang);
+              if (match) setSelectedSubtitleId(match.id);
+            }
           }
         } catch { /* ignore */ }
 
@@ -186,8 +257,8 @@ export default function PlayerPage() {
         api.stream.audioTracks(mediaFileId!).then(tracks => {
           if (!cancelled && tracks.length > 0) {
             setAudioTracks(tracks);
-            // Auto-select preferred language from localStorage
-            const preferred = localStorage.getItem('preferredAudioLanguage');
+            // Auto-select preferred language from preferences or localStorage
+            const preferred = prefs.audioLanguage || localStorage.getItem('preferredAudioLanguage');
             if (preferred && selectedAudioTrack === undefined) {
               const match = tracks.find(t => t.language === preferred);
               if (match && match.streamIndex !== 0) {
@@ -197,7 +268,22 @@ export default function PlayerPage() {
           }
         }).catch(() => {});
 
+        // Fetch chapters for skip intro/recap
+        api.stream.chapters(mediaFileId!).then(chs => {
+          if (!cancelled) setChapters(chs);
+        }).catch(() => {});
+
         video.src = streamUrl;
+        // Store absolute URL for Chromecast casting
+        if (canDirectPlay) {
+          // Direct S3 URL is already absolute
+          castMediaUrlRef.current = streamUrl;
+          castContentTypeRef.current = container === 'webm' ? 'video/webm' : 'video/mp4';
+        } else {
+          // Remux needs absolute URL so Chromecast can reach the server
+          castMediaUrlRef.current = `${window.location.origin}${streamUrl}`;
+          castContentTypeRef.current = 'video/mp4';
+        }
         setLoading(false);
 
         // Don't set currentTime here - wait for loadedmetadata event
@@ -354,17 +440,29 @@ export default function PlayerPage() {
         case ' ':
         case 'k':
           e.preventDefault();
-          video.paused ? video.play() : video.pause();
+          if (chromecast.isConnected && chromecast.isMediaLoaded) {
+            chromecast.playOrPause();
+          } else {
+            video.paused ? video.play() : video.pause();
+          }
           resetControlsTimer();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          video.currentTime = Math.max(0, video.currentTime - 10);
+          if (chromecast.isConnected && chromecast.isMediaLoaded) {
+            chromecast.seek(Math.max(0, chromecast.currentTime - 10));
+          } else {
+            video.currentTime = Math.max(0, video.currentTime - 10);
+          }
           resetControlsTimer();
           break;
         case 'ArrowRight':
           e.preventDefault();
-          video.currentTime = Math.min(isFinite(video.duration) ? video.duration : Infinity, video.currentTime + 10);
+          if (chromecast.isConnected && chromecast.isMediaLoaded) {
+            chromecast.seek(Math.min(chromecast.duration, chromecast.currentTime + 10));
+          } else {
+            video.currentTime = Math.min(isFinite(video.duration) ? video.duration : Infinity, video.currentTime + 10);
+          }
           resetControlsTimer();
           break;
         case 'ArrowUp':
@@ -410,31 +508,40 @@ export default function PlayerPage() {
 
   // Derive effective duration: for remux streams prefer the API-provided duration
   // since video.duration grows as ffmpeg outputs more data
-  const effectiveDuration = knownDuration > 0 && useRemux
-    ? knownDuration
-    : (isFinite(duration) && duration > 0) ? duration : knownDuration;
+  const effectiveDuration = chromecast.isConnected && chromecast.duration > 0
+    ? chromecast.duration
+    : knownDuration > 0 && useRemux
+      ? knownDuration
+      : (isFinite(duration) && duration > 0) ? duration : knownDuration;
+
+  const displayTime = chromecast.isConnected ? chromecast.currentTime : currentTime;
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
-    const video = videoRef.current;
     const bar = progressBarRef.current;
-    if (!video || !bar || effectiveDuration === 0) return;
+    if (!bar || effectiveDuration === 0) return;
     const rect = bar.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const targetTime = ratio * effectiveDuration;
 
-    if (useRemux) {
-      // Remux stream can't seek natively - reload stream at new position
-      seekOffsetRef.current = targetTime;
-      const token = localStorage.getItem('accessToken');
-      const remuxUrl = api.stream.remuxUrl(mediaFileId!, targetTime, selectedAudioTrack);
-      const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
-      video.src = streamUrl;
-      video.play().catch(() => {});
-      setCurrentTime(targetTime);
-      setLoading(true);
+    if (chromecast.isConnected && chromecast.isMediaLoaded) {
+      chromecast.seek(targetTime);
     } else {
-      // Direct/proxy mode: native seek
-      video.currentTime = Math.min(targetTime, effectiveDuration * 0.99);
+      const video = videoRef.current;
+      if (!video) return;
+      if (useRemux) {
+        // Remux stream can't seek natively - reload stream at new position
+        seekOffsetRef.current = targetTime;
+        const token = localStorage.getItem('accessToken');
+        const remuxUrl = api.stream.remuxUrl(mediaFileId!, targetTime, selectedAudioTrack);
+        const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
+        video.src = streamUrl;
+        video.play().catch(() => {});
+        setCurrentTime(targetTime);
+        setLoading(true);
+      } else {
+        // Direct/proxy mode: native seek
+        video.currentTime = Math.min(targetTime, effectiveDuration * 0.99);
+      }
     }
     resetControlsTimer();
   };
@@ -447,7 +554,7 @@ export default function PlayerPage() {
     video.muted = vol === 0;
   };
 
-  const progressPct = effectiveDuration > 0 ? (currentTime / effectiveDuration) * 100 : 0;
+  const progressPct = effectiveDuration > 0 ? (displayTime / effectiveDuration) * 100 : 0;
   const bufferedPct = (() => {
     const video = videoRef.current;
     if (!video || effectiveDuration === 0) return 0;
@@ -468,9 +575,13 @@ export default function PlayerPage() {
       onMouseMove={resetControlsTimer}
       onClick={(e) => {
         // Click on video area = toggle play/pause
-        if ((e.target as HTMLElement).tagName === 'VIDEO') {
-          const video = videoRef.current;
-          if (video) video.paused ? video.play() : video.pause();
+        if ((e.target as HTMLElement).tagName === 'VIDEO' || (e.target as HTMLElement).closest('[data-cast-overlay]')) {
+          if (chromecast.isConnected && chromecast.isMediaLoaded) {
+            chromecast.playOrPause();
+          } else {
+            const video = videoRef.current;
+            if (video) video.paused ? video.play() : video.pause();
+          }
           resetControlsTimer();
         }
       }}
@@ -483,9 +594,17 @@ export default function PlayerPage() {
       />
 
       {/* Loading overlay */}
-      {loading && (
+      {loading && !chromecast.isConnected && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="w-14 h-14 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+        </div>
+      )}
+
+      {/* Cast overlay */}
+      {chromecast.isConnected && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 pointer-events-none">
+          <Cast size={64} className="text-white/60 mb-4" />
+          <p className="text-white text-xl font-medium">{t('player.castingTo', { name: chromecast.deviceName })}</p>
         </div>
       )}
 
@@ -518,7 +637,7 @@ export default function PlayerPage() {
           <button
             onClick={() => setShowDebug(prev => !prev)}
             className={`p-2 rounded-full text-white transition-colors ml-auto ${showDebug ? 'bg-primary' : 'bg-black/30 hover:bg-black/50'}`}
-            title="Toggle debug info (D)"
+            title={t('player.toggleDebug')}
           >
             <Bug size={18} />
           </button>
@@ -528,7 +647,7 @@ export default function PlayerPage() {
       {/* Debug overlay */}
       {showDebug && debugInfo && (
         <div className="absolute top-16 right-4 bg-black/80 text-green-400 text-xs font-mono p-3 rounded-lg max-w-xs leading-relaxed pointer-events-none z-20">
-          <div className="text-green-300 font-bold mb-1">Player Debug</div>
+          <div className="text-green-300 font-bold mb-1">{t('player.debug')}</div>
           <div>Time: {formatTime(debugInfo.currentTime)} / {formatTime(debugInfo.duration)}</div>
           <div>Resolution: {debugInfo.videoWidth}x{debugInfo.videoHeight}</div>
           <div>Container: {debugInfo.container || 'unknown'}</div>
@@ -544,6 +663,49 @@ export default function PlayerPage() {
           {debugInfo.error && <div className="text-red-400">Error: {debugInfo.error}</div>}
           <div className="text-gray-500 mt-1 break-all">Src: {debugInfo.src}</div>
         </div>
+      )}
+
+      {/* Subtitle overlay */}
+      {selectedSubtitleId && (
+        <SubtitleOverlay
+          subtitleUrl={api.stream.subtitleUrl(mediaFileId!, selectedSubtitleId)}
+          currentTime={displayTime}
+          size={prefs.subtitleSize ?? undefined}
+          color={prefs.subtitleColor ?? undefined}
+          background={prefs.subtitleBackground ?? undefined}
+          font={prefs.subtitleFont ?? undefined}
+        />
+      )}
+
+      {/* Skip intro/recap button */}
+      {activeSkipChapter && showControls && (
+        <button
+          onClick={() => {
+            const target = activeSkipChapter.endSeconds;
+            if (chromecast.isConnected && chromecast.isMediaLoaded) {
+              chromecast.seek(target);
+            } else {
+              const video = videoRef.current;
+              if (video) {
+                if (useRemux) {
+                  seekOffsetRef.current = target;
+                  const token = localStorage.getItem('accessToken');
+                  const remuxUrl = api.stream.remuxUrl(mediaFileId!, target, selectedAudioTrack);
+                  const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
+                  video.src = streamUrl;
+                  video.play().catch(() => {});
+                  setCurrentTime(target);
+                  setLoading(true);
+                } else {
+                  video.currentTime = target;
+                }
+              }
+            }
+          }}
+          className="absolute bottom-28 right-6 z-20 px-5 py-2.5 bg-white/20 backdrop-blur-sm border border-white/30 text-white text-sm font-medium rounded-full hover:bg-white/30 transition-colors"
+        >
+          Skip {activeSkipChapter.chapterType === 'intro' ? t('player.intro') : t('player.recap')} →
+        </button>
       )}
 
       {/* Bottom controls */}
@@ -578,15 +740,27 @@ export default function PlayerPage() {
         <div className="flex items-center gap-3 text-white">
           {/* Play/Pause */}
           <button
-            onClick={() => { const v = videoRef.current; if (v) v.paused ? v.play() : v.pause(); }}
+            onClick={() => {
+              if (chromecast.isConnected && chromecast.isMediaLoaded) {
+                chromecast.playOrPause();
+              } else {
+                const v = videoRef.current; if (v) v.paused ? v.play() : v.pause();
+              }
+            }}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
           >
-            {paused ? <Play size={22} /> : <Pause size={22} />}
+            {(chromecast.isConnected ? chromecast.isPaused : paused) ? <Play size={22} /> : <Pause size={22} />}
           </button>
 
           {/* Skip back 10s */}
           <button
-            onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10); }}
+            onClick={() => {
+              if (chromecast.isConnected && chromecast.isMediaLoaded) {
+                chromecast.seek(Math.max(0, chromecast.currentTime - 10));
+              } else {
+                const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10);
+              }
+            }}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             title="Back 10s"
           >
@@ -595,7 +769,13 @@ export default function PlayerPage() {
 
           {/* Skip forward 10s */}
           <button
-            onClick={() => { const v = videoRef.current; if (v) v.currentTime = Math.min(isFinite(v.duration) ? v.duration : Infinity, v.currentTime + 10); }}
+            onClick={() => {
+              if (chromecast.isConnected && chromecast.isMediaLoaded) {
+                chromecast.seek(Math.min(chromecast.duration, chromecast.currentTime + 10));
+              } else {
+                const v = videoRef.current; if (v) v.currentTime = Math.min(isFinite(v.duration) ? v.duration : Infinity, v.currentTime + 10);
+              }
+            }}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
             title="Forward 10s"
           >
@@ -604,7 +784,7 @@ export default function PlayerPage() {
 
           {/* Time display */}
           <span className="text-sm font-mono tabular-nums">
-            {formatTime(currentTime)} / {formatTime(effectiveDuration)}
+            {formatTime(displayTime)} / {formatTime(effectiveDuration)}
           </span>
 
           <div className="flex-1" />
@@ -642,8 +822,10 @@ export default function PlayerPage() {
                 <div className="absolute bottom-full mb-2 right-0 w-56 rounded-lg bg-black/90 border border-white/20 shadow-lg py-1 max-h-64 overflow-y-auto">
                   {audioTracks.map((track) => {
                     const lang = langName(track.language);
-                    const label = track.title || (lang !== 'Unknown' ? lang : `Track ${track.streamIndex + 1}`);
                     const channelLabel = track.channels === 6 ? '5.1' : track.channels === 8 ? '7.1' : `${track.channels}ch`;
+                    const label = lang !== 'Unknown'
+                      ? (track.title ? `${lang} — ${track.title}` : lang)
+                      : (track.title || `${t('player.track', { n: track.streamIndex + 1 })}`);
                     const isSelected = selectedAudioTrack === track.streamIndex || (selectedAudioTrack === undefined && track.streamIndex === 0);
                     return (
                       <button
@@ -665,11 +847,61 @@ export default function PlayerPage() {
             </div>
           )}
 
+          {/* Subtitle tracks */}
+          {subtitles.length > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setShowSubtitleMenu(prev => !prev)}
+                className={`p-1.5 rounded-lg transition-colors ${showSubtitleMenu ? 'bg-white/20' : selectedSubtitleId ? 'text-primary hover:bg-white/10' : 'hover:bg-white/10'}`}
+                title="Subtitles"
+              >
+                <Subtitles size={18} />
+              </button>
+              {showSubtitleMenu && (
+                <div className="absolute bottom-full mb-2 right-0 w-56 rounded-lg bg-black/90 border border-white/20 shadow-lg py-1 max-h-64 overflow-y-auto">
+                  <button
+                    onClick={() => { setSelectedSubtitleId(null); setShowSubtitleMenu(false); }}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                      !selectedSubtitleId ? 'text-primary bg-white/10' : 'text-white hover:bg-white/10'
+                    }`}
+                  >
+                    Off
+                  </button>
+                  {subtitles.map((sub) => (
+                    <button
+                      key={sub.id}
+                      onClick={() => { setSelectedSubtitleId(sub.id); setShowSubtitleMenu(false); }}
+                      className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                        selectedSubtitleId === sub.id ? 'text-primary bg-white/10' : 'text-white hover:bg-white/10'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span>{langName(sub.language)}</span>
+                        <span className="text-xs text-white/50">{sub.format}{sub.isForced ? ` · ${t('media.forced')}` : ''}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Chromecast */}
+          {chromecast.isAvailable && (
+            <button
+              onClick={() => chromecast.isConnected ? chromecast.disconnect() : chromecast.cast()}
+              className={`p-1.5 rounded-lg transition-colors ${chromecast.isConnected ? 'text-primary bg-white/10' : 'hover:bg-white/10'}`}
+              title={chromecast.isConnected ? t('player.castingTo', { name: chromecast.deviceName }) : t('player.cast')}
+            >
+              <Cast size={18} />
+            </button>
+          )}
+
           {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
-            title="Fullscreen (F)"
+            title={t('player.fullscreen')}
           >
             {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
           </button>

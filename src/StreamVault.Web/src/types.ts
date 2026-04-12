@@ -283,3 +283,24 @@ export interface DeviceCodePollResponse {
   status: 'pending' | 'authorized' | 'expired' | 'denied';
   auth: AuthResponse | null;
 }
+
+// === Profile Preferences ===
+export interface ProfilePreferences {
+  language: string | null;
+  audioLanguage: string | null;
+  subtitleLanguage: string | null;
+  maxBitrate: number | null;
+  subtitleSize: string | null;
+  subtitleFont: string | null;
+  subtitleColor: string | null;
+  subtitleBackground: string | null;
+}
+
+// === Chapters ===
+export interface ChapterResponse {
+  id: string;
+  title: string | null;
+  startSeconds: number;
+  endSeconds: number;
+  chapterType: 'intro' | 'recap' | 'credits' | 'other';
+}

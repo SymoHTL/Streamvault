@@ -459,6 +459,27 @@ try
             CREATE UNIQUE INDEX IF NOT EXISTS IX_DeviceCodes_UserCode ON DeviceCodes (UserCode);
             """);
 
+        // Profile preferences column
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Profiles ADD COLUMN PreferencesJson TEXT NULL;"); } catch { }
+
+        // ChapterInfos table
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE IF NOT EXISTS ChapterInfos (
+                Id TEXT NOT NULL PRIMARY KEY,
+                Title TEXT NULL,
+                StartSeconds REAL NOT NULL DEFAULT 0,
+                EndSeconds REAL NOT NULL DEFAULT 0,
+                ChapterType TEXT NOT NULL DEFAULT 'other',
+                MediaFileId TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (MediaFileId) REFERENCES MediaFiles(Id) ON DELETE CASCADE
+            );
+            """);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE INDEX IF NOT EXISTS IX_ChapterInfos_MediaFileId ON ChapterInfos (MediaFileId);
+            """);
+
     }
 
     // Middleware pipeline

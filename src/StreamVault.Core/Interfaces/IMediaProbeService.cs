@@ -14,8 +14,10 @@ public record MediaProbeResult(
     double? DurationSeconds,
     long? FileSize,
     IReadOnlyList<EmbeddedSubtitleInfo> Subtitles,
-    IReadOnlyList<AudioTrackInfo> AudioTracks
+    IReadOnlyList<AudioTrackInfo> AudioTracks,
+    IReadOnlyList<ChapterProbeInfo> Chapters = default!
 );
 
 public record EmbeddedSubtitleInfo(int StreamIndex, string Language, string? Title, string Codec);
 public record AudioTrackInfo(int StreamIndex, string Language, string? Title, string Codec, int Channels);
+public record ChapterProbeInfo(string? Title, double StartSeconds, double EndSeconds);
