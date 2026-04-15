@@ -63,12 +63,17 @@ public class AuthController : BaseController
         // Revoke old token
         storedToken.IsRevoked = true;
 
-        // Preserve profile from the current request's JWT if present
+        // Preserve profile from the current request's JWT if present, or from request body
         Profile? profile = null;
         var profileIdClaim = User.FindFirst("ProfileId")?.Value;
         if (profileIdClaim != null && Guid.TryParse(profileIdClaim, out var profileId))
         {
             profile = storedToken.User.Profiles.FirstOrDefault(p => p.Id == profileId);
+        }
+        // Fallback: use profileId from request body (for when JWT is expired)
+        if (profile == null && request.ProfileId.HasValue)
+        {
+            profile = storedToken.User.Profiles.FirstOrDefault(p => p.Id == request.ProfileId.Value);
         }
 
         // Generate new tokens

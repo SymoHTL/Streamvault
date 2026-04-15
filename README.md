@@ -9,10 +9,16 @@ A self-hosted media streaming server built for S3-compatible storage. Think Jell
 - **Library scanning** — Automatic parsing of Radarr/Sonarr naming conventions
 - **TMDB metadata** — Auto-fetches posters, backdrops, cast, genres, ratings
 - **OpenSubtitles** — Automatic subtitle fetching
-- **Multi-user** — JWT authentication with admin/user roles
+- **Multi-user** — JWT authentication with admin/user roles, multi-profile support
 - **Watch progress** — Cross-device resume with automatic progress tracking
 - **Dark/Light theme** — System preference detection with manual toggle
 - **i18n ready** — English included, structure ready for additional languages
+- **Player enhancements** — Volume persistence, audio normalization, precise volume control, skip intro/recap, chapter detection
+- **Episode navigation** — Previous/next episode buttons, auto-advance on playback end, next episode prompt during credits
+- **Background playback** — Media Session API for background audio on mobile (like YouTube Premium, Netflix)
+- **Smart play** — One-click play/continue from media overview for both movies and TV shows
+- **Chromecast support** — Cast media to Chromecast devices
+- **Proactive auth** — Automatic token refresh before expiry to prevent mid-stream sign-outs
 
 ## Tech Stack
 

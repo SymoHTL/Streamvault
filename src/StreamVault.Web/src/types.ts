@@ -304,3 +304,21 @@ export interface ChapterResponse {
   endSeconds: number;
   chapterType: 'intro' | 'recap' | 'credits' | 'other';
 }
+
+// Episode context for player navigation
+export interface EpisodeContextResponse {
+  showTitle: string;
+  showId: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  episodeTitle: string;
+  previousEpisode: EpisodeNavResponse | null;
+  nextEpisode: EpisodeNavResponse | null;
+}
+
+export interface EpisodeNavResponse {
+  mediaFileId: string;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+}

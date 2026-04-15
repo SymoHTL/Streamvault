@@ -2,8 +2,8 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
-import { ArrowLeft, Bug, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, Languages, Cast, Subtitles } from 'lucide-react';
-import type { AudioTrackInfo, SubtitleResponse, ChapterResponse } from '../types';
+import { ArrowLeft, Bug, Play, Pause, Volume2, VolumeX, Maximize, Minimize, SkipForward, SkipBack, Languages, Cast, Subtitles, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import type { AudioTrackInfo, SubtitleResponse, ChapterResponse, EpisodeContextResponse } from '../types';
 import { useChromecast } from '../hooks/useChromecast';
 import { usePreferencesStore } from '../stores/preferencesStore';
 import SubtitleOverlay from '../components/SubtitleOverlay';
@@ -70,8 +70,11 @@ export default function PlayerPage() {
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem('sv_volume');
+    return saved !== null ? parseFloat(saved) : 1;
+  });
+  const [muted, setMuted] = useState(() => localStorage.getItem('sv_muted') === 'true');
   const [paused, setPaused] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [containerType, setContainerType] = useState('');
@@ -98,6 +101,20 @@ export default function PlayerPage() {
   const [chapters, setChapters] = useState<ChapterResponse[]>([]);
   const [activeSkipChapter, setActiveSkipChapter] = useState<ChapterResponse | null>(null);
 
+  // Episode context (prev/next, show name)
+  const [episodeContext, setEpisodeContext] = useState<EpisodeContextResponse | null>(null);
+  const episodeContextRef = useRef<EpisodeContextResponse | null>(null);
+  const [mediaTitle, setMediaTitle] = useState('');
+
+  // Active credits chapter for "next episode" prompt
+  const [activeCreditsChapter, setActiveCreditsChapter] = useState<ChapterResponse | null>(null);
+
+  // Normalize audio volume
+  const [normalizeAudio, setNormalizeAudio] = useState(() => localStorage.getItem('sv_normalize_audio') === 'true');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+
   const prefs = usePreferencesStore();
   const chromecast = useChromecast();
 
@@ -106,13 +123,76 @@ export default function PlayerPage() {
 
   // Track current chapter for skip intro/recap
   useEffect(() => {
-    if (chapters.length === 0) { setActiveSkipChapter(null); return; }
+    if (chapters.length === 0) { setActiveSkipChapter(null); setActiveCreditsChapter(null); return; }
     const t = chromecast.isConnected ? chromecast.currentTime : currentTime;
     const skip = chapters.find(
       c => (c.chapterType === 'intro' || c.chapterType === 'recap') && t >= c.startSeconds && t < c.endSeconds
     );
     setActiveSkipChapter(skip ?? null);
+    const credits = chapters.find(
+      c => c.chapterType === 'credits' && t >= c.startSeconds && t < c.endSeconds
+    );
+    setActiveCreditsChapter(credits ?? null);
   }, [chapters, currentTime, chromecast.isConnected, chromecast.currentTime]);
+
+  // Persist volume changes
+  useEffect(() => {
+    localStorage.setItem('sv_volume', String(volume));
+    localStorage.setItem('sv_muted', String(muted));
+  }, [volume, muted]);
+
+  // Restore volume on mount
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const savedVol = localStorage.getItem('sv_volume');
+    const savedMuted = localStorage.getItem('sv_muted');
+    if (savedVol !== null) video.volume = parseFloat(savedVol);
+    if (savedMuted !== null) video.muted = savedMuted === 'true';
+  }, []);
+
+  // Audio normalization via Web Audio API
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !normalizeAudio) return;
+    if (sourceNodeRef.current) return; // already connected
+
+    try {
+      const ctx = audioContextRef.current || new AudioContext();
+      audioContextRef.current = ctx;
+      const source = ctx.createMediaElementSource(video);
+      sourceNodeRef.current = source;
+
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
+      compressor.knee.setValueAtTime(30, ctx.currentTime);
+      compressor.ratio.setValueAtTime(12, ctx.currentTime);
+      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
+      compressor.release.setValueAtTime(0.25, ctx.currentTime);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(1.4, ctx.currentTime);
+      gainNodeRef.current = gain;
+
+      source.connect(compressor);
+      compressor.connect(gain);
+      gain.connect(ctx.destination);
+    } catch { /* Web Audio not available */ }
+  }, [normalizeAudio, mediaFileId]);
+
+  // Fetch episode context for nav and title
+  useEffect(() => {
+    if (!mediaFileId) return;
+    api.stream.episodeContext(mediaFileId).then(ctx => {
+      setEpisodeContext(ctx);
+      episodeContextRef.current = ctx;
+      setMediaTitle(`${ctx.showTitle} — S${ctx.seasonNumber}E${ctx.episodeNumber} ${ctx.episodeTitle}`);
+    }).catch(() => {
+      // Not an episode (movie) — try to get title from direct info
+      setEpisodeContext(null);
+      episodeContextRef.current = null;
+    });
+  }, [mediaFileId]);
 
   // When a cast session connects, send the current media to the Chromecast
   const isCastingRef = useRef(false);
@@ -190,6 +270,8 @@ export default function PlayerPage() {
           setVideoCodec(info.videoCodec || '');
           setAudioCodec(fileAudioCodec);
           setResolution(info.resolution || '');
+          // Set media title for movies (episodes override via episodeContext)
+          if (info.title && !mediaTitle) setMediaTitle(info.title);
           if (info.durationSeconds) {
             setKnownDuration(info.durationSeconds);
             knownDurationRef.current = info.durationSeconds;
@@ -302,7 +384,15 @@ export default function PlayerPage() {
 
     const handlePause = () => { reportProgress(); setPaused(true); };
     const handlePlay = () => setPaused(false);
-    const handleEnded = () => { reportProgress(); setPaused(true); };
+    const handleEnded = () => {
+      reportProgress();
+      setPaused(true);
+      // Auto-advance to next episode
+      const ctx = episodeContextRef.current;
+      if (ctx?.nextEpisode) {
+        navigate(`/player/${ctx.nextEpisode.mediaFileId}`, { replace: true });
+      }
+    };
     const handleTimeUpdate = () => {
       setCurrentTime(video.currentTime + seekOffsetRef.current);
       // Only update duration from video element when we don't have a known API duration.
@@ -431,6 +521,42 @@ export default function PlayerPage() {
     return () => document.removeEventListener('fullscreenchange', handleFSChange);
   }, []);
 
+  // Media Session API for background play on mobile (like YT Premium, Netflix)
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: mediaTitle || 'StreamVault',
+    });
+    navigator.mediaSession.setActionHandler('play', () => videoRef.current?.play());
+    navigator.mediaSession.setActionHandler('pause', () => videoRef.current?.pause());
+    navigator.mediaSession.setActionHandler('seekbackward', () => {
+      const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10);
+    });
+    navigator.mediaSession.setActionHandler('seekforward', () => {
+      const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10);
+    });
+    if (episodeContext?.previousEpisode) {
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        reportProgress();
+        navigate(`/player/${episodeContext.previousEpisode!.mediaFileId}`, { replace: true });
+      });
+    }
+    if (episodeContext?.nextEpisode) {
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        reportProgress();
+        navigate(`/player/${episodeContext.nextEpisode!.mediaFileId}`, { replace: true });
+      });
+    }
+    return () => {
+      navigator.mediaSession.setActionHandler('play', null);
+      navigator.mediaSession.setActionHandler('pause', null);
+      navigator.mediaSession.setActionHandler('seekbackward', null);
+      navigator.mediaSession.setActionHandler('seekforward', null);
+      navigator.mediaSession.setActionHandler('previoustrack', null);
+      navigator.mediaSession.setActionHandler('nexttrack', null);
+    };
+  }, [mediaTitle, episodeContext, navigate, reportProgress]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -467,12 +593,12 @@ export default function PlayerPage() {
           break;
         case 'ArrowUp':
           e.preventDefault();
-          video.volume = Math.min(1, video.volume + 0.1);
+          video.volume = Math.min(1, video.volume + 0.05);
           resetControlsTimer();
           break;
         case 'ArrowDown':
           e.preventDefault();
-          video.volume = Math.max(0, video.volume - 0.1);
+          video.volume = Math.max(0, video.volume - 0.05);
           resetControlsTimer();
           break;
         case 'm':
@@ -616,22 +742,30 @@ export default function PlayerPage() {
 
       {/* Error overlay */}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80 z-30">
           <div className="text-center max-w-md p-6">
             <p className="text-red-400 text-lg mb-4">{error}</p>
-            <button
-              onClick={() => navigate(-1)}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg"
-            >
-              Go Back
-            </button>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                onClick={() => setError(null)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg flex items-center gap-2"
+              >
+                <X size={16} /> {t('player.dismiss', 'Dismiss')}
+              </button>
+              <button
+                onClick={() => navigate(-1)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg"
+              >
+                {t('player.goBack', 'Go Back')}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Top bar */}
       <div
-        className={`absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        className={`absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/70 to-transparent transition-opacity duration-300 z-20 ${showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
       >
         <div className="flex items-center gap-3">
           <button
@@ -640,6 +774,9 @@ export default function PlayerPage() {
           >
             <ArrowLeft size={22} />
           </button>
+          {mediaTitle && (
+            <h1 className="text-white text-sm sm:text-base font-medium truncate max-w-[60%]">{mediaTitle}</h1>
+          )}
           <button
             onClick={() => setShowDebug(prev => !prev)}
             className={`p-2 rounded-full text-white transition-colors ml-auto ${showDebug ? 'bg-primary' : 'bg-black/30 hover:bg-black/50'}`}
@@ -714,6 +851,20 @@ export default function PlayerPage() {
         </button>
       )}
 
+      {/* Next episode button during credits/outro */}
+      {activeCreditsChapter && episodeContext?.nextEpisode && showControls && (
+        <button
+          onClick={() => {
+            reportProgress();
+            navigate(`/player/${episodeContext.nextEpisode!.mediaFileId}`, { replace: true });
+          }}
+          className="absolute bottom-28 right-6 z-20 px-6 py-3 bg-white text-black text-sm font-semibold rounded-lg hover:bg-white/90 transition-colors shadow-lg flex items-center gap-2"
+        >
+          <Play size={16} fill="currentColor" />
+          {t('player.nextEpisode', 'Next Episode')} — S{episodeContext.nextEpisode.seasonNumber}E{episodeContext.nextEpisode.episodeNumber}
+        </button>
+      )}
+
       {/* Bottom controls */}
       <div
         data-controls
@@ -744,6 +895,20 @@ export default function PlayerPage() {
 
         {/* Control buttons */}
         <div className="flex items-center gap-3 text-white">
+          {/* Previous episode */}
+          {episodeContext?.previousEpisode && (
+            <button
+              onClick={() => {
+                reportProgress();
+                navigate(`/player/${episodeContext.previousEpisode!.mediaFileId}`, { replace: true });
+              }}
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              title={`S${episodeContext.previousEpisode.seasonNumber}E${episodeContext.previousEpisode.episodeNumber} ${episodeContext.previousEpisode.title}`}
+            >
+              <ChevronLeft size={22} />
+            </button>
+          )}
+
           {/* Play/Pause */}
           <button
             onClick={() => {
@@ -757,6 +922,20 @@ export default function PlayerPage() {
           >
             {(chromecast.isConnected ? chromecast.isPaused : paused) ? <Play size={22} /> : <Pause size={22} />}
           </button>
+
+          {/* Next episode */}
+          {episodeContext?.nextEpisode && (
+            <button
+              onClick={() => {
+                reportProgress();
+                navigate(`/player/${episodeContext.nextEpisode!.mediaFileId}`, { replace: true });
+              }}
+              className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+              title={`S${episodeContext.nextEpisode.seasonNumber}E${episodeContext.nextEpisode.episodeNumber} ${episodeContext.nextEpisode.title}`}
+            >
+              <ChevronRight size={22} />
+            </button>
+          )}
 
           {/* Skip back 10s */}
           <button
@@ -807,11 +986,29 @@ export default function PlayerPage() {
               type="range"
               min="0"
               max="1"
-              step="0.05"
+              step="0.01"
               value={muted ? 0 : volume}
               onChange={handleVolumeInputChange}
-              className="w-20 h-1 accent-primary cursor-pointer"
+              className="w-24 h-1 accent-primary cursor-pointer"
             />
+            <button
+              onClick={() => {
+                const next = !normalizeAudio;
+                setNormalizeAudio(next);
+                localStorage.setItem('sv_normalize_audio', String(next));
+                if (!next && sourceNodeRef.current && audioContextRef.current) {
+                  // Disconnect normalization, reconnect direct
+                  try {
+                    sourceNodeRef.current.disconnect();
+                    sourceNodeRef.current.connect(audioContextRef.current.destination);
+                  } catch { /* ignore */ }
+                }
+              }}
+              className={`p-1 rounded text-[10px] font-bold leading-none transition-colors ${normalizeAudio ? 'bg-primary text-white' : 'bg-white/10 text-white/60 hover:bg-white/20'}`}
+              title={t('player.normalizeVolume', 'Normalize Volume')}
+            >
+              N
+            </button>
           </div>
 
           {/* Audio tracks */}

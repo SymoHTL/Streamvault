@@ -108,6 +108,55 @@ export default function MediaDetailPage() {
     navigate(`/player/${selectedFile.id}${qs ? `?${qs}` : ''}`);
   };
 
+  // Smart play for TV shows: continue watching or start first episode
+  const handleSmartPlay = () => {
+    if (media.mediaType !== 'TvShow' || !tvData) {
+      handlePlay();
+      return;
+    }
+    // Find first episode with incomplete progress (continue watching)
+    for (const season of tvData.seasons) {
+      for (const ep of season.episodes) {
+        if (ep.progress && !ep.progress.completed && ep.progress.positionTicks > 0) {
+          const mf = ep.mediaFiles[0];
+          if (mf) {
+            navigate(`/player/${mf.id}?t=${ep.progress.positionTicks}`);
+            return;
+          }
+        }
+      }
+    }
+    // No in-progress episode found — find the first unwatched episode
+    for (const season of tvData.seasons) {
+      for (const ep of season.episodes) {
+        if (!ep.progress?.completed) {
+          const mf = ep.mediaFiles[0];
+          if (mf) {
+            navigate(`/player/${mf.id}`);
+            return;
+          }
+        }
+      }
+    }
+    // All episodes watched — play the first episode
+    const firstEp = tvData.seasons[0]?.episodes[0];
+    const firstFile = firstEp?.mediaFiles[0];
+    if (firstFile) navigate(`/player/${firstFile.id}`);
+  };
+
+  // Determine play button label for TV shows
+  const getPlayLabel = (): string => {
+    if (media.mediaType !== 'TvShow' || !tvData) return t('media.play');
+    for (const season of tvData.seasons) {
+      for (const ep of season.episodes) {
+        if (ep.progress && !ep.progress.completed && ep.progress.positionTicks > 0) {
+          return `${t('media.continue', 'Continue')} S${season.seasonNumber}E${ep.episodeNumber}`;
+        }
+      }
+    }
+    return t('media.play');
+  };
+
   return (
     <div className="-mx-4 md:-mx-6 -mt-4 md:-mt-6" onClick={() => { setShowListMenu(false); setShowMoreMenu(false); }}>
       {/* Cinematic Hero — NO overflow-hidden so dropdowns render freely */}
@@ -182,12 +231,12 @@ export default function MediaDetailPage() {
 
             {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-3 2xl:gap-4">
-              {selectedFile && (
+              {(selectedFile || media.mediaType === 'TvShow') && (
                 <button
-                  onClick={handlePlay}
+                  onClick={handleSmartPlay}
                   className="flex items-center gap-2 px-8 py-3.5 2xl:px-10 2xl:py-4 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors cursor-pointer text-base 2xl:text-xl"
                 >
-                  <Play size={22} fill="currentColor" /> {t('media.play')}
+                  <Play size={22} fill="currentColor" /> {getPlayLabel()}
                 </button>
               )}
               <button

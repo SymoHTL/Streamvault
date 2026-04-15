@@ -47,9 +47,11 @@ public class StreamController : BaseController
         if (library == null) return NotFound();
 
         var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, mediaFile.S3Key, TimeSpan.FromMinutes(55));
+        var title = mediaFile.MediaItem?.Title ?? mediaFile.Episode?.Season.MediaItem.Title;
         return Ok(new
         {
             url,
+            title,
             container = mediaFile.Container,
             durationSeconds = mediaFile.DurationSeconds,
             videoCodec = mediaFile.VideoCodec,
@@ -477,5 +479,66 @@ public class StreamController : BaseController
             _logger.LogError(ex, "Failed to probe chapters for media file {MediaFileId}", mediaFileId);
             return Ok(Array.Empty<ChapterResponse>());
         }
+    }
+
+    /// <summary>
+    /// Returns episode context (show name, season/episode numbers, previous/next episode)
+    /// for player navigation. Returns 404 for non-episode media files.
+    /// </summary>
+    [HttpGet("{mediaFileId:guid}/episode-context")]
+    public async Task<IActionResult> GetEpisodeContext(Guid mediaFileId)
+    {
+        var mediaFile = await _db.MediaFiles
+            .Include(mf => mf.Episode).ThenInclude(e => e!.Season).ThenInclude(s => s.MediaItem)
+            .FirstOrDefaultAsync(mf => mf.Id == mediaFileId);
+
+        if (mediaFile?.Episode == null) return NotFound();
+
+        var episode = mediaFile.Episode;
+        var season = episode.Season;
+        var show = season.MediaItem;
+
+        // Load all seasons with episodes and their media files for this show
+        var allSeasons = await _db.Seasons
+            .Where(s => s.MediaItemId == show.Id)
+            .Include(s => s.Episodes).ThenInclude(e => e.MediaFiles)
+            .OrderBy(s => s.SeasonNumber)
+            .ToListAsync();
+
+        // Build flat ordered list of all episodes
+        var allEpisodes = allSeasons
+            .SelectMany(s => s.Episodes.OrderBy(e => e.EpisodeNumber).Select(e => new { Season = s, Episode = e }))
+            .ToList();
+
+        var currentIndex = allEpisodes.FindIndex(x => x.Episode.Id == episode.Id);
+
+        EpisodeNavResponse? prev = null;
+        EpisodeNavResponse? next = null;
+
+        if (currentIndex > 0)
+        {
+            var p = allEpisodes[currentIndex - 1];
+            var pFile = p.Episode.MediaFiles.FirstOrDefault();
+            if (pFile != null)
+                prev = new EpisodeNavResponse(pFile.Id, p.Season.SeasonNumber, p.Episode.EpisodeNumber, p.Episode.Title);
+        }
+
+        if (currentIndex >= 0 && currentIndex < allEpisodes.Count - 1)
+        {
+            var n = allEpisodes[currentIndex + 1];
+            var nFile = n.Episode.MediaFiles.FirstOrDefault();
+            if (nFile != null)
+                next = new EpisodeNavResponse(nFile.Id, n.Season.SeasonNumber, n.Episode.EpisodeNumber, n.Episode.Title);
+        }
+
+        return Ok(new EpisodeContextResponse(
+            show.Title,
+            show.Id,
+            season.SeasonNumber,
+            episode.EpisodeNumber,
+            episode.Title,
+            prev,
+            next
+        ));
     }
 }

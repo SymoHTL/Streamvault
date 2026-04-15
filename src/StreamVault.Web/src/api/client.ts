@@ -24,6 +24,7 @@ import type {
   ProfilePreferences,
   ChapterResponse,
   SubtitleResponse,
+  EpisodeContextResponse,
 } from '../types';
 
 const BASE = '';
@@ -79,10 +80,14 @@ async function tryRefreshToken(): Promise<boolean> {
   const refreshToken = localStorage.getItem('refreshToken');
   if (!refreshToken) return false;
   try {
+    // Send profileId so the backend can preserve the profile in the new token
+    // even when the expired JWT can't be parsed
+    const profileData = localStorage.getItem('sv_profile');
+    const profileId = profileData ? JSON.parse(profileData)?.id : undefined;
     const res = await fetch(`${BASE}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({ refreshToken, profileId }),
     });
     if (!res.ok) return false;
     const data: AuthResponse = await res.json();
@@ -102,6 +107,44 @@ async function tryRefreshToken(): Promise<boolean> {
     return false;
   }
 }
+
+// Proactive token refresh: refresh the token before it expires
+// so long-running sessions (watching a movie) don't lose auth mid-stream
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function getTokenExpiry(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function scheduleTokenRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  const token = localStorage.getItem('accessToken');
+  if (!token) return;
+  const expiry = getTokenExpiry(token);
+  if (!expiry) return;
+  // Refresh 2 minutes before expiry (or immediately if already close)
+  const refreshAt = expiry - Date.now() - 2 * 60 * 1000;
+  const delay = Math.max(refreshAt, 5000); // at least 5s delay
+  refreshTimer = setTimeout(async () => {
+    await tryRefreshToken();
+    scheduleTokenRefresh(); // schedule next refresh
+  }, delay);
+}
+
+// Start proactive refresh on load
+scheduleTokenRefresh();
+
+// Re-schedule whenever tokens change
+const origSetItem = localStorage.setItem.bind(localStorage);
+localStorage.setItem = function (key: string, value: string) {
+  origSetItem(key, value);
+  if (key === 'accessToken') scheduleTokenRefresh();
+};
 
 export class ApiError extends Error {
   status: number;
@@ -183,7 +226,7 @@ export const api = {
   },
 
   stream: {
-    getDirectUrl: (mediaFileId: string) => request<{ url: string; container: string; durationSeconds: number | null; videoCodec: string | null; audioCodec: string | null; resolution: string | null; subtitles?: SubtitleResponse[] }>(`/api/stream/${mediaFileId}/direct`),
+    getDirectUrl: (mediaFileId: string) => request<{ url: string; title: string | null; container: string; durationSeconds: number | null; videoCodec: string | null; audioCodec: string | null; resolution: string | null; subtitles?: SubtitleResponse[] }>(`/api/stream/${mediaFileId}/direct`),
     proxyUrl: (mediaFileId: string) => `/api/stream/${mediaFileId}/proxy`,
     remuxUrl: (mediaFileId: string, start?: number, audioTrack?: number) => {
       const params = new URLSearchParams();
@@ -195,6 +238,7 @@ export const api = {
     subtitleUrl: (mediaFileId: string, subtitleId: string) => `/api/stream/${mediaFileId}/subtitles/${subtitleId}`,
     audioTracks: (mediaFileId: string) => request<AudioTrackInfo[]>(`/api/stream/${mediaFileId}/audio-tracks`),
     chapters: (mediaFileId: string) => request<ChapterResponse[]>(`/api/stream/${mediaFileId}/chapters`),
+    episodeContext: (mediaFileId: string) => request<EpisodeContextResponse>(`/api/stream/${mediaFileId}/episode-context`),
   },
 
   progress: {

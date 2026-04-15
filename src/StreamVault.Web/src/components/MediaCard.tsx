@@ -22,9 +22,8 @@ export default function MediaCard({ item, showEpisodeInfo }: Props) {
   const ep = item.episodeInfo;
   const hasEpisode = showEpisodeInfo && ep && ep.seasonNumber > 0;
 
-  const linkTo = hasEpisode
-    ? `/player/${ep.mediaFileId}?t=${item.progress?.positionTicks ?? 0}`
-    : `/media/${item.id}`;
+  // All cards link to the media overview for consistency
+  const linkTo = `/media/${item.id}`;
 
   const listMutation = useMutation({
     mutationFn: (status: MediaListStatus) => api.lists.upsert(item.id, status),

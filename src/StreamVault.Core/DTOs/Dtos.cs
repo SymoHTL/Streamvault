@@ -18,7 +18,8 @@ public record AuthResponse(
 );
 
 public record RefreshTokenRequest(
-    [Required] string RefreshToken
+    [Required] string RefreshToken,
+    Guid? ProfileId = null
 );
 
 // === Profiles ===
@@ -430,4 +431,22 @@ public record ChapterResponse(
     double StartSeconds,
     double EndSeconds,
     string ChapterType
+);
+
+// === Episode Context (for player navigation) ===
+public record EpisodeContextResponse(
+    string ShowTitle,
+    Guid ShowId,
+    int SeasonNumber,
+    int EpisodeNumber,
+    string EpisodeTitle,
+    EpisodeNavResponse? PreviousEpisode,
+    EpisodeNavResponse? NextEpisode
+);
+
+public record EpisodeNavResponse(
+    Guid MediaFileId,
+    int SeasonNumber,
+    int EpisodeNumber,
+    string Title
 );
