@@ -40,12 +40,26 @@ public class LibraryScannerService : ILibraryScanner
             return;
         }
 
+        // Guard against concurrent scans for the same library — if a previous run is still
+        // marked as Scanning and was updated within the last 10 minutes, bail out. Stale
+        // states (older) are reset and we proceed.
+        if (library.ScanStatus == LibraryScanStatus.Scanning &&
+            library.UpdatedAt > DateTime.UtcNow.AddMinutes(-10))
+        {
+            _logger.LogInformation("Scan for library {LibraryName} already in progress, skipping", library.Name);
+            return;
+        }
+
         library.ScanStatus = LibraryScanStatus.Scanning;
         await db.SaveChangesAsync(ct);
 
         try
         {
             _logger.LogInformation("Starting scan for library {LibraryName} ({LibraryId})", library.Name, library.Id);
+
+            // Pre-scan dedupe: existing duplicates (e.g. from prior buggy scans) are
+            // collapsed before we add anything new, so reuse-by-title finds the canonical row.
+            await DedupeExistingItemsAsync(db, library, ct);
 
             var allKeys = await _s3.ListObjectKeysAsync(library.S3ConnectionId, library.S3Prefix, ct);
 
@@ -265,17 +279,24 @@ public class LibraryScannerService : ILibraryScanner
 
         var videoKeys = allKeys.Where(NamingConventionParser.IsVideoFile).ToList();
 
-        // Local cache to avoid re-querying DB for shows added in this scan pass
+        // Local cache, case-insensitive — the same show on disk may differ in casing
+        // between scans, and DB collation may not match. Normalising here is what
+        // prevents two MediaItems being created for "The Office" vs "the office".
         var showCache = new Dictionary<string, MediaItem>(StringComparer.OrdinalIgnoreCase);
 
-        // Pre-load existing shows into cache
+        // Pre-load existing shows into cache. Order by CreatedAt so the canonical (oldest)
+        // row wins when duplicates exist — duplicates are collapsed in DedupeExistingItemsAsync.
         var existingShows = await db.MediaItems
             .Include(m => m.Seasons)
             .ThenInclude(s => s.Episodes)
             .Where(m => m.LibraryId == library.Id && m.MediaType == MediaType.TvShow)
+            .OrderBy(m => m.CreatedAt)
             .ToListAsync(ct);
         foreach (var s in existingShows)
-            showCache[s.Title] = s;
+        {
+            if (!showCache.ContainsKey(s.Title))
+                showCache[s.Title] = s;
+        }
 
         foreach (var videoKey in videoKeys)
         {
@@ -317,7 +338,10 @@ public class LibraryScannerService : ILibraryScanner
                 show.Seasons.Add(season);
             }
 
-            // Find or create episode
+            // Reuse episode if one already exists for this (season, episode number).
+            // Without this we'd create a parallel Episode row whenever an episode is
+            // already in the DB but its old S3Key was renamed — leading to ghost
+            // duplicates in the UI for the same logical episode.
             var episode = season.Episodes.FirstOrDefault(e => e.EpisodeNumber == parsed.EpisodeNumber);
             if (episode == null)
             {
@@ -339,6 +363,7 @@ public class LibraryScannerService : ILibraryScanner
                 EpisodeId = episode.Id
             };
             db.MediaFiles.Add(mediaFile);
+            existingKeys.Add(videoKey);
 
             // Probe the file to detect codecs, resolution, audio tracks, and primary language
             await ProbeMediaFileAsync(db, mediaFile, library.S3ConnectionId, ct);
@@ -347,7 +372,129 @@ public class LibraryScannerService : ILibraryScanner
                 parsed.ShowTitle, parsed.SeasonNumber, parsed.EpisodeNumber, videoKey);
         }
 
+        // Remove episode media files whose S3 keys no longer exist
+        var allVideoKeys = videoKeys.ToHashSet();
+        var orphanedFiles = await db.MediaFiles
+            .Where(mf => mf.Episode != null
+                && mf.Episode.Season.MediaItem.LibraryId == library.Id
+                && !allVideoKeys.Contains(mf.S3Key))
+            .ToListAsync(ct);
+
+        if (orphanedFiles.Count > 0)
+        {
+            db.MediaFiles.RemoveRange(orphanedFiles);
+            _logger.LogInformation("Removed {Count} orphaned episode media files", orphanedFiles.Count);
+        }
+
         await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Collapses duplicate MediaItems / Seasons / Episodes that may have been created
+    /// by earlier buggy scans. Keeps the oldest row in each group and re-parents its
+    /// children + media files onto the canonical row.
+    /// </summary>
+    private async Task DedupeExistingItemsAsync(StreamVaultDbContext db, Library library, CancellationToken ct)
+    {
+        // 1. Collapse duplicate MediaItems sharing (LibraryId, Title, Year)
+        var allItems = await db.MediaItems
+            .Include(m => m.MediaFiles)
+            .Include(m => m.Seasons).ThenInclude(s => s.Episodes).ThenInclude(e => e.MediaFiles)
+            .Where(m => m.LibraryId == library.Id)
+            .OrderBy(m => m.CreatedAt)
+            .ToListAsync(ct);
+
+        var itemGroups = allItems
+            .GroupBy(m => (m.Title.Trim().ToLowerInvariant(), m.Year, m.MediaType))
+            .Where(g => g.Count() > 1);
+
+        var removed = 0;
+        foreach (var group in itemGroups)
+        {
+            var canonical = group.First();
+            foreach (var dup in group.Skip(1))
+            {
+                foreach (var mf in dup.MediaFiles.ToList())
+                    mf.MediaItemId = canonical.Id;
+                foreach (var season in dup.Seasons.ToList())
+                    season.MediaItemId = canonical.Id;
+                db.MediaItems.Remove(dup);
+                removed++;
+            }
+        }
+
+        // 2. Collapse duplicate Seasons sharing (MediaItemId, SeasonNumber)
+        var seasonsBySeries = allItems
+            .Where(m => m.MediaType == MediaType.TvShow)
+            .SelectMany(m => m.Seasons)
+            .GroupBy(s => (s.MediaItemId, s.SeasonNumber))
+            .Where(g => g.Count() > 1);
+
+        foreach (var group in seasonsBySeries)
+        {
+            var ordered = group.OrderBy(s => s.CreatedAt).ToList();
+            var canonical = ordered[0];
+            foreach (var dup in ordered.Skip(1))
+            {
+                foreach (var ep in dup.Episodes.ToList())
+                    ep.SeasonId = canonical.Id;
+                db.Seasons.Remove(dup);
+                removed++;
+            }
+        }
+
+        // 3. Collapse duplicate Episodes sharing (SeasonId, EpisodeNumber)
+        var allEpisodes = allItems
+            .Where(m => m.MediaType == MediaType.TvShow)
+            .SelectMany(m => m.Seasons)
+            .SelectMany(s => s.Episodes)
+            .ToList();
+
+        var epGroups = allEpisodes
+            .GroupBy(e => (e.SeasonId, e.EpisodeNumber))
+            .Where(g => g.Count() > 1);
+
+        foreach (var group in epGroups)
+        {
+            var ordered = group.OrderBy(e => e.CreatedAt).ToList();
+            var canonical = ordered[0];
+            foreach (var dup in ordered.Skip(1))
+            {
+                foreach (var mf in dup.MediaFiles.ToList())
+                    mf.EpisodeId = canonical.Id;
+                db.Episodes.Remove(dup);
+                removed++;
+            }
+        }
+
+        // 4. Collapse duplicate MediaFiles sharing the same S3Key
+        var dupKeys = await db.MediaFiles
+            .Where(mf =>
+                (mf.MediaItem != null && mf.MediaItem.LibraryId == library.Id) ||
+                (mf.Episode != null && mf.Episode.Season.MediaItem.LibraryId == library.Id))
+            .GroupBy(mf => mf.S3Key)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToListAsync(ct);
+
+        foreach (var key in dupKeys)
+        {
+            var dups = await db.MediaFiles
+                .Where(mf => mf.S3Key == key)
+                .OrderBy(mf => mf.CreatedAt)
+                .ToListAsync(ct);
+            foreach (var dup in dups.Skip(1))
+            {
+                db.MediaFiles.Remove(dup);
+                removed++;
+            }
+        }
+
+        if (removed > 0)
+        {
+            _logger.LogInformation("Dedupe: removed {Count} duplicate rows from library {Library}", removed, library.Name);
+            await db.SaveChangesAsync(ct);
+        }
     }
 
     private static string GetSortTitle(string title)

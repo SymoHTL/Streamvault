@@ -228,6 +228,10 @@ public class StreamVaultDbContext : DbContext, IDataProtectionKeyContext
         modelBuilder.Entity<MediaFile>().HasIndex(mf => mf.S3Key).IsUnique();
         modelBuilder.Entity<RefreshToken>().HasIndex(rt => rt.Token).IsUnique();
 
+        // Prevent scanner from ever creating two rows for the same logical episode/season
+        modelBuilder.Entity<Season>().HasIndex(s => new { s.MediaItemId, s.SeasonNumber }).IsUnique();
+        modelBuilder.Entity<Episode>().HasIndex(e => new { e.SeasonId, e.EpisodeNumber }).IsUnique();
+
         // DeviceCode -> User (optional)
         modelBuilder.Entity<DeviceCode>()
             .HasOne(dc => dc.User)

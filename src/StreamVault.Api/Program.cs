@@ -9,6 +9,7 @@ using Serilog;
 using StreamVault.Api.Hubs;
 using StreamVault.Api.Middleware;
 using StreamVault.Core.Configuration;
+using StreamVault.Core.Interfaces;
 using StreamVault.Api;
 using StreamVault.Infrastructure;
 using StreamVault.Infrastructure.Data;
@@ -462,6 +463,30 @@ try
         // Profile preferences column
         try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Profiles ADD COLUMN PreferencesJson TEXT NULL;"); } catch { }
 
+        // Episode thumbnail (Netflix-style still image)
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Episodes ADD COLUMN StillUrl TEXT NULL;"); } catch { }
+
+        // Unique indexes that prevent the scanner from creating duplicate rows on retry/race.
+        // Wrapped in try/catch because adding a unique index against existing duplicates fails
+        // — the scanner now collapses any pre-existing duplicates on next scan, after which
+        // these indexes will succeed. Re-attempted on every startup until they take.
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_Seasons_MediaItemId_SeasonNumber
+                ON Seasons (MediaItemId, SeasonNumber);
+                """);
+        }
+        catch (Exception ex) { Log.Warning(ex, "Could not create Seasons unique index — duplicates remain. Trigger a library rescan to collapse them."); }
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_Episodes_SeasonId_EpisodeNumber
+                ON Episodes (SeasonId, EpisodeNumber);
+                """);
+        }
+        catch (Exception ex) { Log.Warning(ex, "Could not create Episodes unique index — duplicates remain. Trigger a library rescan to collapse them."); }
+
         // ChapterInfos table
         await db.Database.ExecuteSqlRawAsync("""
             CREATE TABLE IF NOT EXISTS ChapterInfos (
@@ -510,6 +535,32 @@ try
         svc => svc.CleanupExpiredRefreshTokens(), Cron.Daily);
     RecurringJob.AddOrUpdate<TokenCleanupService>("cleanup-expired-device-codes",
         svc => svc.CleanupExpiredDeviceCodes(), Cron.Hourly);
+
+    // Recurring library scans — register one job per library using its ScanScheduleCron.
+    // Without this, the cron field on Library is dead config; scans only run on manual trigger.
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<StreamVaultDbContext>();
+        var libraries = await db.Libraries.ToListAsync();
+        foreach (var lib in libraries)
+        {
+            if (string.IsNullOrWhiteSpace(lib.ScanScheduleCron)) continue;
+            var capturedId = lib.Id;
+            try
+            {
+                RecurringJob.AddOrUpdate<ILibraryScanner>(
+                    $"scan-library-{capturedId}",
+                    s => s.ScanLibraryAsync(capturedId, CancellationToken.None),
+                    lib.ScanScheduleCron);
+                Log.Information("Scheduled library scan {LibraryName} with cron {Cron}", lib.Name, lib.ScanScheduleCron);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Failed to schedule library scan for {LibraryName} — invalid cron expression {Cron}",
+                    lib.Name, lib.ScanScheduleCron);
+            }
+        }
+    }
 
     // SPA fallback — return index.html for unmatched routes
     app.MapFallbackToFile("index.html");

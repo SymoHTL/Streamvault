@@ -30,6 +30,12 @@ import type {
 const BASE = '';
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  // If a refresh is already in flight, wait for it before sending the request.
+  // Without this, multiple concurrent calls during a refresh window can each ride
+  // a stale token, hit 401, and stampede the refresh endpoint in parallel.
+  if (pendingRefresh) {
+    try { await pendingRefresh; } catch { /* fall through; the request will 401 if needed */ }
+  }
   const token = localStorage.getItem('accessToken');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -76,36 +82,46 @@ function hasNoBody(res: Response): boolean {
   return false;
 }
 
-async function tryRefreshToken(): Promise<boolean> {
-  const refreshToken = localStorage.getItem('refreshToken');
-  if (!refreshToken) return false;
-  try {
-    // Send profileId so the backend can preserve the profile in the new token
-    // even when the expired JWT can't be parsed
-    const profileData = localStorage.getItem('sv_profile');
-    const profileId = profileData ? JSON.parse(profileData)?.id : undefined;
-    const res = await fetch(`${BASE}/api/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken, profileId }),
-    });
-    if (!res.ok) return false;
-    const data: AuthResponse = await res.json();
-    localStorage.setItem('accessToken', data.accessToken);
-    localStorage.setItem('refreshToken', data.refreshToken);
-    // Update sessions array
-    const activeUserId = localStorage.getItem('sv_activeUserId');
-    if (activeUserId) {
-      const sessions = JSON.parse(localStorage.getItem('sv_sessions') || '[]');
-      const updated = sessions.map((s: { userId: string }) =>
-        s.userId === activeUserId ? { ...s, accessToken: data.accessToken, refreshToken: data.refreshToken } : s
-      );
-      localStorage.setItem('sv_sessions', JSON.stringify(updated));
+// Single in-flight refresh promise so multiple concurrent 401s share one /refresh call.
+let pendingRefresh: Promise<boolean> | null = null;
+
+function tryRefreshToken(): Promise<boolean> {
+  if (pendingRefresh) return pendingRefresh;
+  pendingRefresh = (async () => {
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) return false;
+    try {
+      // Send profileId so the backend can preserve the profile in the new token
+      // even when the expired JWT can't be parsed
+      const profileData = localStorage.getItem('sv_profile');
+      const profileId = profileData ? JSON.parse(profileData)?.id : undefined;
+      const res = await fetch(`${BASE}/api/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken, profileId }),
+      });
+      if (!res.ok) return false;
+      const data: AuthResponse = await res.json();
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      // Update sessions array
+      const activeUserId = localStorage.getItem('sv_activeUserId');
+      if (activeUserId) {
+        const sessions = JSON.parse(localStorage.getItem('sv_sessions') || '[]');
+        const updated = sessions.map((s: { userId: string }) =>
+          s.userId === activeUserId ? { ...s, accessToken: data.accessToken, refreshToken: data.refreshToken } : s
+        );
+        localStorage.setItem('sv_sessions', JSON.stringify(updated));
+      }
+      return true;
+    } catch {
+      return false;
+    } finally {
+      // Cleared on next tick so any awaiter gets the result before we drop the promise.
+      setTimeout(() => { pendingRefresh = null; }, 0);
     }
-    return true;
-  } catch {
-    return false;
-  }
+  })();
+  return pendingRefresh;
 }
 
 // Proactive token refresh: refresh the token before it expires
@@ -127,12 +143,16 @@ function scheduleTokenRefresh() {
   if (!token) return;
   const expiry = getTokenExpiry(token);
   if (!expiry) return;
-  // Refresh 2 minutes before expiry (or immediately if already close)
-  const refreshAt = expiry - Date.now() - 2 * 60 * 1000;
-  const delay = Math.max(refreshAt, 5000); // at least 5s delay
+  // Refresh roughly halfway through the token's remaining life, with a minimum
+  // 5-minute lead so we don't try to use an almost-expired token mid-stream.
+  // Previously this was a fixed 2-minute window — too tight for active usage,
+  // and any concurrent request stampede during the window would hit 401.
+  const remaining = expiry - Date.now();
+  const lead = Math.max(5 * 60 * 1000, Math.floor(remaining / 2));
+  const delay = Math.max(remaining - lead, 5000);
   refreshTimer = setTimeout(async () => {
     await tryRefreshToken();
-    scheduleTokenRefresh(); // schedule next refresh
+    scheduleTokenRefresh();
   }, delay);
 }
 

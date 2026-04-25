@@ -155,6 +155,7 @@ export interface EpisodeResponse {
   title: string;
   overview: string | null;
   runtimeMinutes: number | null;
+  stillUrl: string | null;
   mediaFiles: MediaFileResponse[];
   progress: WatchProgressResponse | null;
 }

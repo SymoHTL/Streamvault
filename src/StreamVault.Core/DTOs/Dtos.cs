@@ -280,6 +280,7 @@ public record EpisodeResponse(
     string Title,
     string? Overview,
     int? RuntimeMinutes,
+    string? StillUrl,
     IReadOnlyList<MediaFileResponse> MediaFiles,
     WatchProgressResponse? Progress
 );

@@ -91,7 +91,7 @@ public class MediaController : BaseController
                         : null;
 
                     return new EpisodeResponse(
-                        e.Id, e.EpisodeNumber, e.Title, e.Overview, e.RuntimeMinutes,
+                        e.Id, e.EpisodeNumber, e.Title, e.Overview, e.RuntimeMinutes, e.StillUrl,
                         e.MediaFiles.Select(mf2 => new MediaFileResponse(
                             mf2.Id, mf2.S3Key, mf2.Container, mf2.VideoCodec, mf2.AudioCodec,
                             mf2.Resolution, mf2.DurationSeconds,

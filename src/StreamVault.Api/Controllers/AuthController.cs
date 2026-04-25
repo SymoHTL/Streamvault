@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using StreamVault.Core.Configuration;
 using StreamVault.Core.DTOs;
 using StreamVault.Core.Entities;
 using StreamVault.Core.Interfaces;
@@ -12,11 +14,13 @@ public class AuthController : BaseController
 {
     private readonly StreamVaultDbContext _db;
     private readonly ITokenService _tokenService;
+    private readonly JwtSettings _jwt;
 
-    public AuthController(StreamVaultDbContext db, ITokenService tokenService)
+    public AuthController(StreamVaultDbContext db, ITokenService tokenService, IOptions<StreamVaultSettings> settings)
     {
         _db = db;
         _tokenService = tokenService;
+        _jwt = settings.Value.Jwt;
     }
 
     [HttpPost("login")]
@@ -42,7 +46,7 @@ public class AuthController : BaseController
         return Ok(new AuthResponse(
             accessToken,
             refreshToken.Token,
-            DateTime.UtcNow.AddMinutes(15),
+            DateTime.UtcNow.AddMinutes(_jwt.AccessTokenExpiryMinutes),
             new UserResponse(user.Id, user.Username, user.Email, user.Role.ToString(), user.CreatedAt),
             null,
             profiles
@@ -91,7 +95,7 @@ public class AuthController : BaseController
         return Ok(new AuthResponse(
             newAccessToken,
             newRefreshToken.Token,
-            DateTime.UtcNow.AddMinutes(15),
+            DateTime.UtcNow.AddMinutes(_jwt.AccessTokenExpiryMinutes),
             new UserResponse(storedToken.User.Id, storedToken.User.Username, storedToken.User.Email,
                 storedToken.User.Role.ToString(), storedToken.User.CreatedAt),
             profileResponse,

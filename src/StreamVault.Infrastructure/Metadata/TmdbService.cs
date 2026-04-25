@@ -230,6 +230,8 @@ public class TmdbService : ITmdbService
                             episode.Title = tmdbEp.Name ?? episode.Title;
                             episode.Overview = tmdbEp.Overview;
                             episode.RuntimeMinutes = tmdbEp.Runtime > 0 ? (int?)tmdbEp.Runtime : null;
+                            if (!string.IsNullOrEmpty(tmdbEp.StillPath))
+                                episode.StillUrl = $"https://image.tmdb.org/t/p/w300{tmdbEp.StillPath}";
                         }
                     }
                     catch (Exception ex)

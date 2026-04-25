@@ -407,19 +407,34 @@ export default function PlayerPage() {
         setDuration(video.duration + seekOffsetRef.current);
       }
       setLoading(false);
-      // Restore position from audio track switch or saved progress (only when not remux-seeking)
-      if (seekOffsetRef.current === 0) {
-        const audioResume = sessionStorage.getItem('audioTrackResume');
-        if (audioResume) {
-          sessionStorage.removeItem('audioTrackResume');
-          const startSeconds = parseInt(audioResume, 10) / 10_000_000;
-          if (startSeconds > 0) {
-            video.currentTime = startSeconds;
-          }
-        } else if (resumeSecondsRef.current > 0) {
-          video.currentTime = resumeSecondsRef.current;
+    };
+
+    // Seek to resume position only once we have actual playable data (readyState >= 3).
+    // Seeking on `loadedmetadata` is too early — the audio decoder may not yet have
+    // valid timestamps, which produces audible drift / desync after the seek lands.
+    let seekDone = false;
+    const handleCanPlay = () => {
+      if (seekDone) return;
+      // Remux mode embeds the seek in the URL — no client-side seek needed.
+      if (seekOffsetRef.current !== 0) { seekDone = true; return; }
+
+      const audioResume = sessionStorage.getItem('audioTrackResume');
+      let target = 0;
+      if (audioResume) {
+        sessionStorage.removeItem('audioTrackResume');
+        target = parseInt(audioResume, 10) / 10_000_000;
+      } else if (resumeSecondsRef.current > 0) {
+        target = resumeSecondsRef.current;
+      }
+      if (target > 0) {
+        const v = video as HTMLVideoElement & { fastSeek?: (t: number) => void };
+        if (typeof v.fastSeek === 'function') {
+          v.fastSeek(target);
+        } else {
+          v.currentTime = target;
         }
       }
+      seekDone = true;
     };
     const handleVolumeChange = () => {
       setVolume(video.volume);
@@ -435,6 +450,7 @@ export default function PlayerPage() {
     video.addEventListener('ended', handleEnded);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('volumechange', handleVolumeChange);
     video.addEventListener('error', handleError);
 
@@ -447,6 +463,7 @@ export default function PlayerPage() {
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('volumechange', handleVolumeChange);
       video.removeEventListener('error', handleError);
     };

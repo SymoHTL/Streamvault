@@ -108,25 +108,40 @@ export default function MediaDetailPage() {
     navigate(`/player/${selectedFile.id}${qs ? `?${qs}` : ''}`);
   };
 
-  // Smart play for TV shows: continue watching or start first episode
+  // Find the in-progress episode (if any) once, so the play button + the
+  // resume chip show consistent info instead of recomputing on each render.
+  const inProgressEpisode = (() => {
+    if (media.mediaType !== 'TvShow' || !tvData) return null;
+    for (const season of tvData.seasons) {
+      for (const ep of season.episodes) {
+        if (ep.progress && !ep.progress.completed && ep.progress.positionTicks > 0) {
+          return { season, episode: ep };
+        }
+      }
+    }
+    return null;
+  })();
+
+  const resumePct = inProgressEpisode?.episode.progress?.durationSeconds
+    ? Math.round(
+        (inProgressEpisode.episode.progress!.positionTicks /
+          (inProgressEpisode.episode.progress!.durationSeconds * 10_000_000)) * 100
+      )
+    : null;
+
   const handleSmartPlay = () => {
     if (media.mediaType !== 'TvShow' || !tvData) {
       handlePlay();
       return;
     }
-    // Find first episode with incomplete progress (continue watching)
-    for (const season of tvData.seasons) {
-      for (const ep of season.episodes) {
-        if (ep.progress && !ep.progress.completed && ep.progress.positionTicks > 0) {
-          const mf = ep.mediaFiles[0];
-          if (mf) {
-            navigate(`/player/${mf.id}?t=${ep.progress.positionTicks}`);
-            return;
-          }
-        }
+    if (inProgressEpisode) {
+      const mf = inProgressEpisode.episode.mediaFiles[0];
+      if (mf) {
+        navigate(`/player/${mf.id}?t=${inProgressEpisode.episode.progress!.positionTicks}`);
+        return;
       }
     }
-    // No in-progress episode found — find the first unwatched episode
+    // No in-progress episode — find the first unwatched
     for (const season of tvData.seasons) {
       for (const ep of season.episodes) {
         if (!ep.progress?.completed) {
@@ -138,24 +153,17 @@ export default function MediaDetailPage() {
         }
       }
     }
-    // All episodes watched — play the first episode
+    // All watched — play first episode
     const firstEp = tvData.seasons[0]?.episodes[0];
     const firstFile = firstEp?.mediaFiles[0];
     if (firstFile) navigate(`/player/${firstFile.id}`);
   };
 
-  // Determine play button label for TV shows
-  const getPlayLabel = (): string => {
+  const playLabel: string = (() => {
     if (media.mediaType !== 'TvShow' || !tvData) return t('media.play');
-    for (const season of tvData.seasons) {
-      for (const ep of season.episodes) {
-        if (ep.progress && !ep.progress.completed && ep.progress.positionTicks > 0) {
-          return `${t('media.continue', 'Continue')} S${season.seasonNumber}E${ep.episodeNumber}`;
-        }
-      }
-    }
+    if (inProgressEpisode) return t('media.resume', 'Resume');
     return t('media.play');
-  };
+  })();
 
   return (
     <div className="-mx-4 md:-mx-6 -mt-4 md:-mt-6" onClick={() => { setShowListMenu(false); setShowMoreMenu(false); }}>
@@ -229,6 +237,26 @@ export default function MediaDetailPage() {
               </div>
             )}
 
+            {/* Continue-watching chip — separate, prominent surface above the
+                play button so the user sees what they'll resume into and a
+                progress bar, rather than having that info squished into the
+                button label. */}
+            {inProgressEpisode && (
+              <div className="mb-3 inline-flex flex-col gap-1.5 px-4 py-2.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10 max-w-md">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-white/60 font-semibold">
+                  {t('media.continueWatching', 'Continue Watching')}
+                </div>
+                <div className="text-white text-sm font-medium truncate">
+                  S{inProgressEpisode.season.seasonNumber}E{inProgressEpisode.episode.episodeNumber} — {inProgressEpisode.episode.title}
+                </div>
+                {resumePct !== null && (
+                  <div className="h-1 rounded-full bg-white/15 overflow-hidden">
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${resumePct}%` }} />
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-3 2xl:gap-4">
               {(selectedFile || media.mediaType === 'TvShow') && (
@@ -236,7 +264,7 @@ export default function MediaDetailPage() {
                   onClick={handleSmartPlay}
                   className="flex items-center gap-2 px-8 py-3.5 2xl:px-10 2xl:py-4 bg-white hover:bg-white/90 text-black rounded-lg font-semibold transition-colors cursor-pointer text-base 2xl:text-xl"
                 >
-                  <Play size={22} fill="currentColor" /> {getPlayLabel()}
+                  <Play size={22} fill="currentColor" /> {playLabel}
                 </button>
               )}
               <button
@@ -632,47 +660,80 @@ function TvShowSeasons({ data }: { data: TvShowDetailResponse }) {
       )}
 
       {selectedSeason && (
-        <div className="rounded-xl border border-border dark:border-border-dark overflow-hidden">
-          <div className="divide-y divide-border dark:divide-border-dark max-h-[600px] overflow-y-auto">
-            {selectedSeason.episodes.map((ep) => {
-              const mf = pickFile(ep.mediaFiles);
-              const progressPct = ep.progress && ep.progress.durationSeconds
-                ? Math.round((ep.progress.positionTicks / (ep.progress.durationSeconds * 10_000_000)) * 100)
-                : null;
+        <div className="space-y-3">
+          {selectedSeason.episodes.map((ep) => {
+            const mf = pickFile(ep.mediaFiles);
+            const progressPct = ep.progress && ep.progress.durationSeconds
+              ? Math.round((ep.progress.positionTicks / (ep.progress.durationSeconds * 10_000_000)) * 100)
+              : null;
+            const isCompleted = ep.progress?.completed;
 
-              return (
-                <div
-                  key={ep.id}
-                  role="button"
-                  tabIndex={0}
-                  className="flex items-center gap-4 px-5 py-4 hover:bg-surface-secondary/50 dark:hover:bg-surface-secondary-dark/50 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset"
-                  onClick={() => mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`); } }}
-                >
-                  <span className="text-base font-medium text-muted dark:text-muted-dark w-8 text-center shrink-0">
-                    {ep.episodeNumber}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-text dark:text-text-dark truncate">{ep.title}</div>
-                    <div className="flex items-center gap-2">
-                      {ep.runtimeMinutes && <span className="text-xs text-muted dark:text-muted-dark">{ep.runtimeMinutes} min</span>}
-                      {ep.overview && <span className="text-xs text-muted dark:text-muted-dark truncate hidden sm:inline">{ep.overview}</span>}
+            return (
+              <div
+                key={ep.id}
+                role="button"
+                tabIndex={0}
+                className="group flex flex-col sm:flex-row gap-4 p-3 rounded-xl hover:bg-surface-secondary/60 dark:hover:bg-surface-secondary-dark/60 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                onClick={() => mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`); } }}
+              >
+                {/* Thumbnail (16:9, Netflix-style) */}
+                <div className="relative shrink-0 w-full sm:w-64 aspect-video rounded-lg overflow-hidden bg-surface-secondary dark:bg-surface-secondary-dark">
+                  {ep.stillUrl ? (
+                    <img
+                      src={ep.stillUrl}
+                      alt={ep.title}
+                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-muted dark:text-muted-dark text-3xl font-bold">
+                      {ep.episodeNumber}
                     </div>
-                    {progressPct !== null && progressPct < 100 && (
-                      <div className="mt-1.5 h-1 rounded-full bg-border dark:bg-border-dark">
-                        <div className="h-full bg-primary rounded-full" style={{ width: `${progressPct}%` }} />
-                      </div>
-                    )}
+                  )}
+                  {/* Play overlay */}
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/40 transition-colors">
+                    <div className="w-12 h-12 rounded-full bg-white/90 text-black flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Play size={20} fill="currentColor" />
+                    </div>
                   </div>
-                  {mf && (
-                    <button className="px-3 py-2 bg-primary hover:bg-primary-hover text-white text-sm rounded-lg shrink-0">
-                      <Play size={16} />
-                    </button>
+                  {/* Progress bar at bottom */}
+                  {progressPct !== null && progressPct > 0 && progressPct < 100 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
+                      <div className="h-full bg-primary" style={{ width: `${progressPct}%` }} />
+                    </div>
+                  )}
+                  {isCompleted && (
+                    <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 text-[10px] font-bold uppercase rounded bg-black/70 text-white">
+                      ✓
+                    </div>
                   )}
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Text content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-semibold text-muted dark:text-muted-dark">
+                      {ep.episodeNumber}
+                    </span>
+                    <h3 className="text-base font-semibold text-text dark:text-text-dark truncate">
+                      {ep.title}
+                    </h3>
+                    {ep.runtimeMinutes && (
+                      <span className="text-xs text-muted dark:text-muted-dark shrink-0">
+                        · {ep.runtimeMinutes}m
+                      </span>
+                    )}
+                  </div>
+                  {ep.overview && (
+                    <p className="text-sm text-muted dark:text-muted-dark line-clamp-2">
+                      {ep.overview}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

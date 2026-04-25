@@ -69,6 +69,8 @@ public class LibrariesController : BaseController
         _db.Libraries.Add(library);
         await _db.SaveChangesAsync();
 
+        ScheduleLibraryScan(library.Id, library.ScanScheduleCron);
+
         return CreatedAtAction(nameof(GetById), new { id = library.Id },
             new LibraryResponse(library.Id, library.Name, library.Type.ToString(), library.S3Prefix,
                 library.ScanScheduleCron, library.ScanStatus.ToString(), library.LastScannedAt,
@@ -90,6 +92,8 @@ public class LibrariesController : BaseController
 
         await _db.SaveChangesAsync();
 
+        ScheduleLibraryScan(library.Id, library.ScanScheduleCron);
+
         var itemCount = await _db.MediaItems.CountAsync(m => m.LibraryId == id);
         return Ok(new LibraryResponse(library.Id, library.Name, library.Type.ToString(), library.S3Prefix,
             library.ScanScheduleCron, library.ScanStatus.ToString(), library.LastScannedAt,
@@ -105,6 +109,7 @@ public class LibrariesController : BaseController
 
         _db.Libraries.Remove(library);
         await _db.SaveChangesAsync();
+        try { RecurringJob.RemoveIfExists($"scan-library-{id}"); } catch { /* ignore */ }
         return NoContent();
     }
 
@@ -114,6 +119,23 @@ public class LibrariesController : BaseController
     {
         BackgroundJob.Enqueue<ILibraryScanner>(scanner => scanner.ScanLibraryAsync(id, CancellationToken.None));
         return Accepted();
+    }
+
+    private static void ScheduleLibraryScan(Guid libraryId, string cron)
+    {
+        if (string.IsNullOrWhiteSpace(cron)) return;
+        try
+        {
+            RecurringJob.AddOrUpdate<ILibraryScanner>(
+                $"scan-library-{libraryId}",
+                s => s.ScanLibraryAsync(libraryId, CancellationToken.None),
+                cron);
+        }
+        catch
+        {
+            // Swallow invalid cron — startup logs will surface the issue at next restart.
+            // Don't 500 the admin's library save just because of a bad cron string.
+        }
     }
 
     [HttpGet("{id:guid}/items")]
