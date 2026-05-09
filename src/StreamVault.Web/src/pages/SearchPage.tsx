@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '../api/client';
@@ -9,6 +9,7 @@ export default function SearchPage() {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['search', debouncedQuery],
@@ -16,12 +17,15 @@ export default function SearchPage() {
     enabled: debouncedQuery.length >= 2,
   });
 
-  let debounceTimer: ReturnType<typeof setTimeout>;
   const handleChange = (value: string) => {
     setQuery(value);
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => setDebouncedQuery(value), 300);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => setDebouncedQuery(value), 300);
   };
+
+  useEffect(() => () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+  }, []);
 
   return (
     <div>

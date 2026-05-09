@@ -466,6 +466,9 @@ try
         // Episode thumbnail (Netflix-style still image)
         try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Episodes ADD COLUMN StillUrl TEXT NULL;"); } catch { }
 
+        // Embedded subtitle stream index. Null means external/local subtitle file.
+        try { await db.Database.ExecuteSqlRawAsync("ALTER TABLE Subtitles ADD COLUMN StreamIndex INTEGER NULL;"); } catch { }
+
         // Unique indexes that prevent the scanner from creating duplicate rows on retry/race.
         // Wrapped in try/catch because adding a unique index against existing duplicates fails
         // — the scanner now collapses any pre-existing duplicates on next scan, after which

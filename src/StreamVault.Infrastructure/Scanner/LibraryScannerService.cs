@@ -230,27 +230,7 @@ public class LibraryScannerService : ILibraryScanner
             // Probe the file to detect codecs, resolution, audio tracks, and primary language
             await ProbeMediaFileAsync(db, mediaFile, library.S3ConnectionId, ct);
 
-            // Find associated subtitles
-            var videoBaseName = Path.GetFileNameWithoutExtension(videoKey);
-            var videoDir = Path.GetDirectoryName(videoKey)?.Replace('\\', '/') ?? "";
-            foreach (var subKey in subtitleKeys.Where(sk =>
-                sk.StartsWith(videoDir, StringComparison.OrdinalIgnoreCase) &&
-                Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(sk))
-                    .StartsWith(videoBaseName, StringComparison.OrdinalIgnoreCase)))
-            {
-                var subParsed = NamingConventionParser.ParseSubtitlePath(subKey);
-                if (subParsed == null) continue;
-
-                db.Subtitles.Add(new Subtitle
-                {
-                    S3Key = subKey,
-                    Language = subParsed.Language,
-                    Format = Enum.TryParse<SubtitleFormat>(subParsed.Format, true, out var fmt) ? fmt : SubtitleFormat.Srt,
-                    IsExternal = true,
-                    IsForced = subParsed.IsForced,
-                    MediaFileId = mediaFile.Id
-                });
-            }
+            AssociateExternalSubtitles(db, mediaFile, subtitleKeys);
 
             _logger.LogInformation("Found movie: {Title} ({Year}) - {Key}", parsed.Title, parsed.Year, videoKey);
         }
@@ -268,6 +248,8 @@ public class LibraryScannerService : ILibraryScanner
         }
 
         await db.SaveChangesAsync(ct);
+        await BackfillExternalSubtitlesAsync(db, library, allKeys, ct);
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task ScanTvShowsAsync(StreamVaultDbContext db, Library library, IReadOnlyList<string> allKeys, CancellationToken ct)
@@ -278,6 +260,7 @@ public class LibraryScannerService : ILibraryScanner
             .ToHashSetAsync(ct);
 
         var videoKeys = allKeys.Where(NamingConventionParser.IsVideoFile).ToList();
+        var subtitleKeys = allKeys.Where(NamingConventionParser.IsSubtitleFile).ToList();
 
         // Local cache, case-insensitive — the same show on disk may differ in casing
         // between scans, and DB collation may not match. Normalising here is what
@@ -367,6 +350,7 @@ public class LibraryScannerService : ILibraryScanner
 
             // Probe the file to detect codecs, resolution, audio tracks, and primary language
             await ProbeMediaFileAsync(db, mediaFile, library.S3ConnectionId, ct);
+            AssociateExternalSubtitles(db, mediaFile, subtitleKeys);
 
             _logger.LogInformation("Found TV: {Show} S{Season:D2}E{Episode:D2} - {Key}",
                 parsed.ShowTitle, parsed.SeasonNumber, parsed.EpisodeNumber, videoKey);
@@ -387,6 +371,59 @@ public class LibraryScannerService : ILibraryScanner
         }
 
         await db.SaveChangesAsync(ct);
+        await BackfillExternalSubtitlesAsync(db, library, allKeys, ct);
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static void AssociateExternalSubtitles(StreamVaultDbContext db, MediaFile mediaFile, IReadOnlyList<string> subtitleKeys)
+    {
+        if (subtitleKeys.Count == 0) return;
+
+        var videoBaseName = Path.GetFileNameWithoutExtension(mediaFile.S3Key);
+        var videoDir = Path.GetDirectoryName(mediaFile.S3Key)?.Replace('\\', '/') ?? "";
+
+        foreach (var subKey in subtitleKeys.Where(sk =>
+            (videoDir.Length == 0 || sk.StartsWith(videoDir, StringComparison.OrdinalIgnoreCase)) &&
+            Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(sk))
+                .StartsWith(videoBaseName, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (mediaFile.Subtitles.Any(s => s.S3Key == subKey) ||
+                db.Subtitles.Local.Any(s => s.MediaFileId == mediaFile.Id && s.S3Key == subKey))
+            {
+                continue;
+            }
+
+            var subParsed = NamingConventionParser.ParseSubtitlePath(subKey);
+            if (subParsed == null) continue;
+
+            db.Subtitles.Add(new Subtitle
+            {
+                S3Key = subKey,
+                Language = subParsed.Language,
+                Format = Enum.TryParse<SubtitleFormat>(subParsed.Format, true, out var fmt) ? fmt : SubtitleFormat.Srt,
+                IsExternal = true,
+                IsForced = subParsed.IsForced,
+                MediaFileId = mediaFile.Id
+            });
+        }
+    }
+
+    private static async Task BackfillExternalSubtitlesAsync(StreamVaultDbContext db, Library library, IReadOnlyList<string> allKeys, CancellationToken ct)
+    {
+        var subtitleKeys = allKeys.Where(NamingConventionParser.IsSubtitleFile).ToList();
+        if (subtitleKeys.Count == 0) return;
+
+        var mediaFiles = await db.MediaFiles
+            .Include(mf => mf.Subtitles)
+            .Where(mf =>
+                (mf.MediaItem != null && mf.MediaItem.LibraryId == library.Id) ||
+                (mf.Episode != null && mf.Episode.Season.MediaItem.LibraryId == library.Id))
+            .ToListAsync(ct);
+
+        foreach (var mediaFile in mediaFiles)
+        {
+            AssociateExternalSubtitles(db, mediaFile, subtitleKeys);
+        }
     }
 
     /// <summary>
@@ -539,8 +576,27 @@ public class LibraryScannerService : ILibraryScanner
                 });
             }
 
-            _logger.LogInformation("Probed {S3Key}: {Resolution} {VideoCodec} tracks={TrackCount}",
-                mediaFile.S3Key, result.Resolution, result.VideoCodec, result.AudioTracks.Count);
+            foreach (var sub in result.Subtitles)
+            {
+                if (mediaFile.Subtitles.Any(s => s.StreamIndex == sub.StreamIndex && !s.IsExternal) ||
+                    db.Subtitles.Local.Any(s => s.MediaFileId == mediaFile.Id && s.StreamIndex == sub.StreamIndex && !s.IsExternal))
+                {
+                    continue;
+                }
+
+                db.Subtitles.Add(new Subtitle
+                {
+                    StreamIndex = sub.StreamIndex,
+                    Language = sub.Language,
+                    Format = sub.Codec.Equals("webvtt", StringComparison.OrdinalIgnoreCase) ? SubtitleFormat.Vtt : SubtitleFormat.Srt,
+                    IsExternal = false,
+                    IsForced = sub.Title?.Contains("forced", StringComparison.OrdinalIgnoreCase) == true,
+                    MediaFileId = mediaFile.Id
+                });
+            }
+
+            _logger.LogInformation("Probed {S3Key}: {Resolution} {VideoCodec} tracks={TrackCount} subtitles={SubtitleCount}",
+                mediaFile.S3Key, result.Resolution, result.VideoCodec, result.AudioTracks.Count, result.Subtitles.Count);
         }
         catch (Exception ex)
         {

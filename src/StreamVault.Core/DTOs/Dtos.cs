@@ -229,7 +229,8 @@ public record SubtitleResponse(
     string Language,
     string Format,
     bool IsExternal,
-    bool IsForced
+    bool IsForced,
+    int? StreamIndex = null
 );
 
 public record MediaImageResponse(

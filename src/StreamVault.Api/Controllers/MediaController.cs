@@ -76,6 +76,15 @@ public class MediaController : BaseController
 
         var posterPath = item.Images.FirstOrDefault(i => i.Type == ImageType.Poster)?.SourceUrl;
         var backdropPath = item.Images.FirstOrDefault(i => i.Type == ImageType.Backdrop)?.SourceUrl;
+        var episodeMediaFileIds = item.Seasons
+            .SelectMany(s => s.Episodes)
+            .SelectMany(e => e.MediaFiles)
+            .Select(mf => mf.Id)
+            .ToList();
+        var progressByMediaFileId = await _db.WatchProgresses
+            .Where(wp => wp.ProfileId == profileId && episodeMediaFileIds.Contains(wp.MediaFileId))
+            .Include(wp => wp.MediaFile)
+            .ToDictionaryAsync(wp => wp.MediaFileId);
 
         return Ok(new TvShowDetailResponse(
             item.Id, item.Title, item.Year, item.Overview, item.CommunityRating,
@@ -85,10 +94,11 @@ public class MediaController : BaseController
                 s.Id, s.SeasonNumber, s.Name,
                 s.Episodes.OrderBy(e => e.EpisodeNumber).Select(e =>
                 {
-                    var mf = e.MediaFiles.FirstOrDefault();
-                    var progress = mf != null
-                        ? _db.WatchProgresses.FirstOrDefault(wp => wp.ProfileId == profileId && wp.MediaFileId == mf.Id)
-                        : null;
+                    var progress = e.MediaFiles
+                        .Select(mf => progressByMediaFileId.GetValueOrDefault(mf.Id))
+                        .Where(wp => wp != null)
+                        .OrderByDescending(wp => wp!.LastWatchedAt)
+                        .FirstOrDefault();
 
                     return new EpisodeResponse(
                         e.Id, e.EpisodeNumber, e.Title, e.Overview, e.RuntimeMinutes, e.StillUrl,
@@ -98,7 +108,7 @@ public class MediaController : BaseController
                             mf2.Subtitles.Select(sub => new SubtitleResponse(sub.Id, sub.Language, sub.Format.ToString(), sub.IsExternal, sub.IsForced)).ToList(),
                             mf2.AudioTracks.OrderBy(at => at.StreamIndex).Select(at => new AudioTrackResponse(at.StreamIndex, at.Language, at.Title, at.Codec, at.Channels)).ToList()
                         )).ToList(),
-                        progress != null ? new WatchProgressResponse(progress.MediaFileId, progress.PositionTicks, progress.Completed, progress.LastWatchedAt, mf?.DurationSeconds) : null
+                        progress != null ? new WatchProgressResponse(progress.MediaFileId, progress.PositionTicks, progress.Completed, progress.LastWatchedAt, progress.MediaFile.DurationSeconds) : null
                     );
                 }).ToList()
             )).ToList(),

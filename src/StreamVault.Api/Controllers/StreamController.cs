@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -57,7 +58,7 @@ public class StreamController : BaseController
             videoCodec = mediaFile.VideoCodec,
             audioCodec = mediaFile.AudioCodec,
             resolution = mediaFile.Resolution,
-            subtitles = mediaFile.Subtitles.Select(s => new SubtitleResponse(s.Id, s.Language, s.Format.ToString(), s.IsExternal, s.IsForced)).ToList()
+            subtitles = mediaFile.Subtitles.Select(s => new SubtitleResponse(s.Id, s.Language, s.Format.ToString(), s.IsExternal, s.IsForced, s.StreamIndex)).ToList()
         });
     }
 
@@ -238,16 +239,15 @@ public class StreamController : BaseController
 
         if (presignedUrl != null)
         {
-            // Pre-signed URL: -ss before -i for fast keyframe-accurate seeking
-            var seekArgs = start > 0 ? $"-ss {start:F2}" : "";
-            args = $"{seekArgs} -fflags +genpts -i \"{presignedUrl}\" {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -avoid_negative_ts make_zero -af aresample=async=1:first_pts=0 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
+            var seekArgs = start > 0 ? $"-ss {FormatSeconds(start)}" : "";
+            args = $"{seekArgs} -fflags +genpts -i \"{presignedUrl}\" {mapArgs} -map_metadata -1 -c:v copy -c:a aac -b:a 192k -ac 2 -avoid_negative_ts make_zero -af aresample=async=1000:first_pts=0 -max_interleave_delta 0 -muxdelay 0 -muxpreload 0 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
             usePipe = false;
         }
         else
         {
             // Pipe: -ss after -i (output seeking, slower)
-            var seekArgs = start > 0 ? $"-ss {start:F2}" : "";
-            args = $"-fflags +genpts -i pipe:0 {seekArgs} {mapArgs} -c:v copy -c:a aac -b:a 192k -ac 2 -avoid_negative_ts make_zero -af aresample=async=1:first_pts=0 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
+            var seekArgs = start > 0 ? $"-ss {FormatSeconds(start)}" : "";
+            args = $"-fflags +genpts -i pipe:0 {seekArgs} {mapArgs} -map_metadata -1 -c:v copy -c:a aac -b:a 192k -ac 2 -avoid_negative_ts make_zero -af aresample=async=1000:first_pts=0 -max_interleave_delta 0 -muxdelay 0 -muxpreload 0 -f mp4 -movflags frag_keyframe+empty_moov+default_base_moof pipe:1";
             usePipe = true;
         }
 
@@ -384,7 +384,59 @@ public class StreamController : BaseController
 
         if (subtitle == null) return NotFound();
 
-        if (!subtitle.IsExternal && !string.IsNullOrEmpty(subtitle.S3Key))
+        if (subtitle.StreamIndex.HasValue)
+        {
+            var library = subtitle.MediaFile.MediaItem?.Library ?? subtitle.MediaFile.Episode?.Season.MediaItem.Library;
+            if (library == null) return NotFound();
+
+            var url = await _s3.GetPreSignedUrlAsync(library.S3ConnectionId, subtitle.MediaFile.S3Key, TimeSpan.FromMinutes(10));
+            var args = $"-v warning -i \"{url}\" -map 0:s:{subtitle.StreamIndex.Value} -f webvtt pipe:1";
+            var psi = new ProcessStartInfo
+            {
+                FileName = _ffmpegPath,
+                Arguments = args,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            var process = Process.Start(psi);
+            if (process == null) return StatusCode(500, "Failed to start subtitle extraction");
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var stderr = await process.StandardError.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(stderr))
+                        _logger.LogWarning("ffmpeg subtitle stderr: {Stderr}", stderr[..Math.Min(stderr.Length, 1000)]);
+                }
+                catch { /* ignore */ }
+            });
+
+            Response.ContentType = "text/vtt; charset=utf-8";
+            try
+            {
+                await process.StandardOutput.BaseStream.CopyToAsync(Response.Body, HttpContext.RequestAborted);
+                await process.WaitForExitAsync(HttpContext.RequestAborted);
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected
+            }
+            finally
+            {
+                if (!process.HasExited)
+                {
+                    try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                }
+                process.Dispose();
+            }
+            return new EmptyResult();
+        }
+
+        if (!string.IsNullOrEmpty(subtitle.S3Key))
         {
             var library = subtitle.MediaFile.MediaItem?.Library ?? subtitle.MediaFile.Episode?.Season.MediaItem.Library;
             if (library == null) return NotFound();
@@ -407,6 +459,9 @@ public class StreamController : BaseController
 
         return NotFound();
     }
+
+    private static string FormatSeconds(double value) =>
+        value.ToString("0.###", CultureInfo.InvariantCulture);
 
     [HttpGet("{mediaFileId:guid}/chapters")]
     public async Task<IActionResult> GetChapters(Guid mediaFileId)

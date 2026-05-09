@@ -53,10 +53,21 @@ function getBufferedRanges(video: HTMLVideoElement): string {
   return ranges.join(', ') || 'none';
 }
 
+function getBufferedPercent(video: HTMLVideoElement, effectiveDuration: number, seekOffset: number): number {
+  if (effectiveDuration <= 0) return 0;
+  for (let i = video.buffered.length - 1; i >= 0; i--) {
+    if (video.buffered.start(i) <= video.currentTime) {
+      return ((video.buffered.end(i) + seekOffset) / effectiveDuration) * 100;
+    }
+  }
+  return 0;
+}
+
 export default function PlayerPage() {
   const { t } = useTranslation();
   const { mediaFileId } = useParams<{ mediaFileId: string }>();
   const [searchParams] = useSearchParams();
+  const searchKey = searchParams.toString();
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,6 +81,7 @@ export default function PlayerPage() {
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [bufferedPct, setBufferedPct] = useState(0);
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem('sv_volume');
     return saved !== null ? parseFloat(saved) : 1;
@@ -82,7 +94,12 @@ export default function PlayerPage() {
   const [audioCodec, setAudioCodec] = useState('');
   const [resolution, setResolution] = useState('');
   const [audioTracks, setAudioTracks] = useState<AudioTrackInfo[]>([]);
-  const [selectedAudioTrack, setSelectedAudioTrack] = useState<number | undefined>(undefined);
+  const [selectedAudioTrack, setSelectedAudioTrack] = useState<number | undefined>(() => {
+    const audio = searchParams.get('audio');
+    if (!audio) return undefined;
+    const parsed = Number(audio);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  });
   const [showAudioMenu, setShowAudioMenu] = useState(false);
   const [useRemux, setUseRemux] = useState(false);
   const [knownDuration, setKnownDuration] = useState(0);
@@ -94,20 +111,15 @@ export default function PlayerPage() {
 
   // Subtitle state
   const [subtitles, setSubtitles] = useState<SubtitleResponse[]>([]);
-  const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(null);
+  const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(() => searchParams.get('sub'));
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
 
   // Chapter / skip intro state
   const [chapters, setChapters] = useState<ChapterResponse[]>([]);
-  const [activeSkipChapter, setActiveSkipChapter] = useState<ChapterResponse | null>(null);
-
   // Episode context (prev/next, show name)
   const [episodeContext, setEpisodeContext] = useState<EpisodeContextResponse | null>(null);
   const episodeContextRef = useRef<EpisodeContextResponse | null>(null);
   const [mediaTitle, setMediaTitle] = useState('');
-
-  // Active credits chapter for "next episode" prompt
-  const [activeCreditsChapter, setActiveCreditsChapter] = useState<ChapterResponse | null>(null);
 
   // Normalize audio volume
   const [normalizeAudio, setNormalizeAudio] = useState(() => localStorage.getItem('sv_normalize_audio') === 'true');
@@ -117,23 +129,51 @@ export default function PlayerPage() {
 
   const prefs = usePreferencesStore();
   const chromecast = useChromecast();
+  const chromecastProgressRef = useRef({ isConnected: false, currentTime: 0 });
 
   // Load preferences
-  useEffect(() => { if (!prefs.loaded) prefs.load(); }, []);
+  useEffect(() => { if (!prefs.loaded) prefs.load(); }, [prefs]);
 
-  // Track current chapter for skip intro/recap
   useEffect(() => {
-    if (chapters.length === 0) { setActiveSkipChapter(null); setActiveCreditsChapter(null); return; }
-    const t = chromecast.isConnected ? chromecast.currentTime : currentTime;
-    const skip = chapters.find(
-      c => (c.chapterType === 'intro' || c.chapterType === 'recap') && t >= c.startSeconds && t < c.endSeconds
-    );
-    setActiveSkipChapter(skip ?? null);
-    const credits = chapters.find(
-      c => c.chapterType === 'credits' && t >= c.startSeconds && t < c.endSeconds
-    );
-    setActiveCreditsChapter(credits ?? null);
-  }, [chapters, currentTime, chromecast.isConnected, chromecast.currentTime]);
+    chromecastProgressRef.current = {
+      isConnected: chromecast.isConnected,
+      currentTime: chromecast.currentTime,
+    };
+  }, [chromecast.isConnected, chromecast.currentTime]);
+
+  useEffect(() => {
+    const resetId = window.setTimeout(() => {
+      const nextParams = new URLSearchParams(searchKey);
+      const audio = nextParams.get('audio');
+      const parsedAudio = audio ? Number(audio) : NaN;
+      setSelectedAudioTrack(Number.isFinite(parsedAudio) ? parsedAudio : undefined);
+      setSelectedSubtitleId(nextParams.get('sub'));
+      setSubtitles([]);
+      setChapters([]);
+      setCurrentTime(0);
+      setDuration(0);
+      setBufferedPct(0);
+      setLoading(true);
+      setError(null);
+    }, 0);
+    return () => window.clearTimeout(resetId);
+  }, [mediaFileId, searchKey]);
+
+  const reloadRemuxAt = useCallback((targetTime: number, audioTrack = selectedAudioTrack) => {
+    const video = videoRef.current;
+    if (!video || !mediaFileId) return;
+    seekOffsetRef.current = targetTime;
+    const token = localStorage.getItem('accessToken');
+    const remuxUrl = api.stream.remuxUrl(mediaFileId, targetTime, audioTrack);
+    const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
+    video.pause();
+    video.src = streamUrl;
+    video.load();
+    video.play().catch(() => {});
+    setCurrentTime(targetTime);
+    setBufferedPct(0);
+    setLoading(true);
+  }, [mediaFileId, selectedAudioTrack]);
 
   // Persist volume changes
   useEffect(() => {
@@ -212,26 +252,23 @@ export default function PlayerPage() {
       const video = videoRef.current;
       if (video && chromecast.currentTime > 0) {
         if (useRemux) {
-          // Reload remux at cast position
-          seekOffsetRef.current = chromecast.currentTime;
-          const token = localStorage.getItem('accessToken');
-          const remuxUrl = api.stream.remuxUrl(mediaFileId!, chromecast.currentTime, selectedAudioTrack);
-          const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
-          video.src = streamUrl;
+          const castTime = chromecast.currentTime;
+          window.setTimeout(() => reloadRemuxAt(castTime), 0);
         } else {
           video.currentTime = chromecast.currentTime;
         }
         video.play().catch(() => {});
       }
     }
-  }, [chromecast.isConnected]);
+  }, [chromecast.isConnected, reloadRemuxAt, useRemux]);
 
   const reportProgress = useCallback(async () => {
     if (!mediaFileId) return;
     // Use cast time when casting, otherwise local video time
     let actualTime: number;
-    if (isCastingRef.current && chromecast.isConnected) {
-      actualTime = chromecast.currentTime;
+    const castProgress = chromecastProgressRef.current;
+    if (isCastingRef.current && castProgress.isConnected) {
+      actualTime = castProgress.currentTime;
       if (!actualTime || actualTime === 0) return;
     } else {
       if (!videoRef.current) return;
@@ -278,12 +315,17 @@ export default function PlayerPage() {
           }
           if (info.subtitles && info.subtitles.length > 0) {
             setSubtitles(info.subtitles);
-            // Auto-select subtitle based on preference
-            const prefLang = prefs.subtitleLanguage;
-            if (prefLang) {
+            const requestedSub = searchParams.get('sub');
+            if (requestedSub && info.subtitles.some(s => s.id === requestedSub)) {
+              setSelectedSubtitleId(requestedSub);
+            } else if (!requestedSub && !selectedSubtitleId) {
+              const prefLang = prefs.subtitleLanguage;
               const match = info.subtitles.find(s => s.language === prefLang);
               if (match) setSelectedSubtitleId(match.id);
             }
+          } else {
+            setSubtitles([]);
+            setSelectedSubtitleId(null);
           }
         } catch { /* ignore */ }
 
@@ -291,6 +333,9 @@ export default function PlayerPage() {
         const startAtParam = searchParams.get('t');
         if (startAtParam) {
           resumeSeconds = parseInt(startAtParam, 10) / 10_000_000;
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete('t');
+          window.history.replaceState(window.history.state, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
         } else {
           try {
             const progress = await api.progress.get(mediaFileId!);
@@ -317,6 +362,26 @@ export default function PlayerPage() {
         const isRemux = !canDirectPlay;
         setUseRemux(isRemux);
 
+        const requestedAudio = searchParams.get('audio');
+        const requestedAudioTrack = requestedAudio ? Number(requestedAudio) : NaN;
+        let effectiveAudioTrack = Number.isFinite(requestedAudioTrack) ? requestedAudioTrack : undefined;
+        try {
+          const tracks = await api.stream.audioTracks(mediaFileId!);
+          if (!cancelled && tracks.length > 0) {
+            setAudioTracks(tracks);
+            const preferred = prefs.audioLanguage || localStorage.getItem('preferredAudioLanguage');
+            if (effectiveAudioTrack === undefined && preferred) {
+              const match = tracks.find(track => track.language === preferred);
+              if (match) effectiveAudioTrack = match.streamIndex;
+            }
+            if (effectiveAudioTrack !== selectedAudioTrack) {
+              setSelectedAudioTrack(effectiveAudioTrack);
+            }
+          }
+        } catch {
+          if (!cancelled) setAudioTracks([]);
+        }
+
         if (canDirectPlay) {
           // True direct play: use the pre-signed S3 URL (no proxy, native seeking)
           try {
@@ -331,24 +396,9 @@ export default function PlayerPage() {
           // Remux: ffmpeg transcodes audio to AAC, copies video, outputs fragmented MP4
           const startPos = resumeSeconds > 0 ? resumeSeconds : undefined;
           if (startPos) seekOffsetRef.current = startPos;
-          const remuxUrl = api.stream.remuxUrl(mediaFileId!, startPos, selectedAudioTrack);
+          const remuxUrl = api.stream.remuxUrl(mediaFileId!, startPos, effectiveAudioTrack);
           streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
         }
-
-        // Fetch audio tracks in the background
-        api.stream.audioTracks(mediaFileId!).then(tracks => {
-          if (!cancelled && tracks.length > 0) {
-            setAudioTracks(tracks);
-            // Auto-select preferred language from preferences or localStorage
-            const preferred = prefs.audioLanguage || localStorage.getItem('preferredAudioLanguage');
-            if (preferred && selectedAudioTrack === undefined) {
-              const match = tracks.find(t => t.language === preferred);
-              if (match && match.streamIndex !== 0) {
-                setSelectedAudioTrack(match.streamIndex);
-              }
-            }
-          }
-        }).catch(() => {});
 
         // Fetch chapters for skip intro/recap
         api.stream.chapters(mediaFileId!).then(chs => {
@@ -398,9 +448,12 @@ export default function PlayerPage() {
       // Only update duration from video element when we don't have a known API duration.
       // In remux mode, video.duration reflects only what's been remuxed so far;
       // the real duration comes from knownDurationRef (API-provided).
+      let bufferDuration = knownDurationRef.current;
       if (knownDurationRef.current <= 0 && isFinite(video.duration) && video.duration > 0) {
-        setDuration(video.duration + seekOffsetRef.current);
+        bufferDuration = video.duration + seekOffsetRef.current;
+        setDuration(bufferDuration);
       }
+      setBufferedPct(getBufferedPercent(video, bufferDuration, seekOffsetRef.current));
     };
     const handleLoadedMetadata = () => {
       if (knownDurationRef.current <= 0 && isFinite(video.duration) && video.duration > 0) {
@@ -467,13 +520,14 @@ export default function PlayerPage() {
       video.removeEventListener('volumechange', handleVolumeChange);
       video.removeEventListener('error', handleError);
     };
-  }, [mediaFileId, reportProgress, selectedAudioTrack]);
+  }, [mediaFileId, reportProgress, searchKey]);
 
   // Handle audio track change - restart stream at current position  
   const handleAudioTrackChange = useCallback((trackIndex: number) => {
     if (!useRemux) return; // Can only switch audio tracks in remux mode
     const video = videoRef.current;
     const currentPos = video?.currentTime ?? 0;
+    const actualPos = currentPos + seekOffsetRef.current;
     setSelectedAudioTrack(trackIndex);
     // Save preference
     const track = audioTracks.find(t => t.streamIndex === trackIndex);
@@ -481,15 +535,8 @@ export default function PlayerPage() {
       localStorage.setItem('preferredAudioLanguage', track.language);
     }
     setShowAudioMenu(false);
-    // The useEffect will reload the stream with the new track
-    // We need to resume from current position (including seek offset)
-    const actualPos = currentPos + seekOffsetRef.current;
-    if (actualPos > 0 && video) {
-      const ticks = Math.floor(actualPos * 10_000_000);
-      // Store resume position for the reload
-      sessionStorage.setItem('audioTrackResume', String(ticks));
-    }
-  }, [useRemux, audioTracks]);
+    reloadRemuxAt(Math.max(0, actualPos), trackIndex);
+  }, [useRemux, audioTracks, reloadRemuxAt]);
 
   // Update debug info periodically
   useEffect(() => {
@@ -531,6 +578,15 @@ export default function PlayerPage() {
     }, 3000);
   }, []);
 
+  const toggleFullscreen = useCallback(() => {
+    if (!containerRef.current) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      containerRef.current.requestFullscreen();
+    }
+  }, []);
+
   // Fullscreen change listener
   useEffect(() => {
     const handleFSChange = () => setIsFullscreen(!!document.fullscreenElement);
@@ -547,10 +603,20 @@ export default function PlayerPage() {
     navigator.mediaSession.setActionHandler('play', () => videoRef.current?.play());
     navigator.mediaSession.setActionHandler('pause', () => videoRef.current?.pause());
     navigator.mediaSession.setActionHandler('seekbackward', () => {
-      const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10);
+      const v = videoRef.current;
+      if (!v) return;
+      if (useRemux) reloadRemuxAt(Math.max(0, v.currentTime + seekOffsetRef.current - 10));
+      else v.currentTime = Math.max(0, v.currentTime - 10);
     });
     navigator.mediaSession.setActionHandler('seekforward', () => {
-      const v = videoRef.current; if (v) v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10);
+      const v = videoRef.current;
+      if (!v) return;
+      if (useRemux) {
+        const maxTime = knownDurationRef.current > 0 ? knownDurationRef.current : Infinity;
+        reloadRemuxAt(Math.min(maxTime, v.currentTime + seekOffsetRef.current + 10));
+      } else {
+        v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 10);
+      }
     });
     if (episodeContext?.previousEpisode) {
       navigator.mediaSession.setActionHandler('previoustrack', () => {
@@ -572,7 +638,7 @@ export default function PlayerPage() {
       navigator.mediaSession.setActionHandler('previoustrack', null);
       navigator.mediaSession.setActionHandler('nexttrack', null);
     };
-  }, [mediaTitle, episodeContext, navigate, reportProgress]);
+  }, [mediaTitle, episodeContext, navigate, reportProgress, useRemux, reloadRemuxAt]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -586,7 +652,8 @@ export default function PlayerPage() {
           if (chromecast.isConnected && chromecast.isMediaLoaded) {
             chromecast.playOrPause();
           } else {
-            video.paused ? video.play() : video.pause();
+            if (video.paused) video.play();
+            else video.pause();
           }
           resetControlsTimer();
           break;
@@ -594,6 +661,8 @@ export default function PlayerPage() {
           e.preventDefault();
           if (chromecast.isConnected && chromecast.isMediaLoaded) {
             chromecast.seek(Math.max(0, chromecast.currentTime - 10));
+          } else if (useRemux) {
+            reloadRemuxAt(Math.max(0, video.currentTime + seekOffsetRef.current - 10));
           } else {
             video.currentTime = Math.max(0, video.currentTime - 10);
           }
@@ -603,6 +672,9 @@ export default function PlayerPage() {
           e.preventDefault();
           if (chromecast.isConnected && chromecast.isMediaLoaded) {
             chromecast.seek(Math.min(chromecast.duration, chromecast.currentTime + 10));
+          } else if (useRemux) {
+            const maxTime = knownDurationRef.current > 0 ? knownDurationRef.current : Infinity;
+            reloadRemuxAt(Math.min(maxTime, video.currentTime + seekOffsetRef.current + 10));
           } else {
             video.currentTime = Math.min(isFinite(video.duration) ? video.duration : Infinity, video.currentTime + 10);
           }
@@ -631,6 +703,18 @@ export default function PlayerPage() {
           e.preventDefault();
           setShowDebug(prev => !prev);
           break;
+        case 'c':
+          e.preventDefault();
+          if (subtitles.length > 0) {
+            setSelectedSubtitleId(prev => {
+              if (!prev) return subtitles[0].id;
+              const current = subtitles.findIndex(sub => sub.id === prev);
+              const next = current + 1;
+              return next >= subtitles.length ? null : subtitles[next].id;
+            });
+          }
+          resetControlsTimer();
+          break;
         case 'Escape':
           if (!document.fullscreenElement) navigate(-1);
           break;
@@ -638,16 +722,7 @@ export default function PlayerPage() {
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [navigate, resetControlsTimer]);
-
-  const toggleFullscreen = () => {
-    if (!containerRef.current) return;
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      containerRef.current.requestFullscreen();
-    }
-  };
+  }, [navigate, resetControlsTimer, subtitles, toggleFullscreen, useRemux, reloadRemuxAt]);
 
   // Derive effective duration: for remux streams prefer the API-provided duration
   // since video.duration grows as ffmpeg outputs more data
@@ -658,6 +733,12 @@ export default function PlayerPage() {
       : (isFinite(duration) && duration > 0) ? duration : knownDuration;
 
   const displayTime = chromecast.isConnected ? chromecast.currentTime : currentTime;
+  const activeSkipChapter = chapters.find(
+    c => (c.chapterType === 'intro' || c.chapterType === 'recap') && displayTime >= c.startSeconds && displayTime < c.endSeconds
+  ) ?? null;
+  const activeCreditsChapter = chapters.find(
+    c => c.chapterType === 'credits' && displayTime >= c.startSeconds && displayTime < c.endSeconds
+  ) ?? null;
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const bar = progressBarRef.current;
@@ -673,14 +754,7 @@ export default function PlayerPage() {
       if (!video) return;
       if (useRemux) {
         // Remux stream can't seek natively - reload stream at new position
-        seekOffsetRef.current = targetTime;
-        const token = localStorage.getItem('accessToken');
-        const remuxUrl = api.stream.remuxUrl(mediaFileId!, targetTime, selectedAudioTrack);
-        const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
-        video.src = streamUrl;
-        video.play().catch(() => {});
-        setCurrentTime(targetTime);
-        setLoading(true);
+        reloadRemuxAt(targetTime);
       } else {
         // Direct/proxy mode: native seek
         video.currentTime = Math.min(targetTime, effectiveDuration * 0.99);
@@ -698,18 +772,6 @@ export default function PlayerPage() {
   };
 
   const progressPct = effectiveDuration > 0 ? (displayTime / effectiveDuration) * 100 : 0;
-  const bufferedPct = (() => {
-    const video = videoRef.current;
-    if (!video || effectiveDuration === 0) return 0;
-    for (let i = video.buffered.length - 1; i >= 0; i--) {
-      if (video.buffered.start(i) <= video.currentTime) {
-        // In remux mode, buffered ranges are relative to the remux start.
-        // Add seekOffset to translate to absolute file position.
-        return ((video.buffered.end(i) + seekOffsetRef.current) / effectiveDuration) * 100;
-      }
-    }
-    return 0;
-  })();
 
   return (
     <div
@@ -729,7 +791,10 @@ export default function PlayerPage() {
             chromecast.playOrPause();
           } else {
             const video = videoRef.current;
-            if (video) video.paused ? video.play() : video.pause();
+            if (video) {
+              if (video.paused) video.play();
+              else video.pause();
+            }
           }
           resetControlsTimer();
         }
@@ -848,14 +913,7 @@ export default function PlayerPage() {
               const video = videoRef.current;
               if (video) {
                 if (useRemux) {
-                  seekOffsetRef.current = target;
-                  const token = localStorage.getItem('accessToken');
-                  const remuxUrl = api.stream.remuxUrl(mediaFileId!, target, selectedAudioTrack);
-                  const streamUrl = `${remuxUrl}${remuxUrl.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token || '')}`;
-                  video.src = streamUrl;
-                  video.play().catch(() => {});
-                  setCurrentTime(target);
-                  setLoading(true);
+                  reloadRemuxAt(target);
                 } else {
                   video.currentTime = target;
                 }
@@ -869,13 +927,13 @@ export default function PlayerPage() {
       )}
 
       {/* Next episode button during credits/outro */}
-      {activeCreditsChapter && episodeContext?.nextEpisode && showControls && (
+      {activeCreditsChapter && episodeContext?.nextEpisode && (
         <button
           onClick={() => {
             reportProgress();
             navigate(`/player/${episodeContext.nextEpisode!.mediaFileId}`, { replace: true });
           }}
-          className="absolute bottom-28 right-6 z-20 px-6 py-3 bg-white text-black text-sm font-semibold rounded-lg hover:bg-white/90 transition-colors shadow-lg flex items-center gap-2"
+          className="absolute bottom-28 right-6 z-30 px-6 py-3 bg-white text-black text-sm font-semibold rounded-lg hover:bg-white/90 transition-colors shadow-lg flex items-center gap-2"
         >
           <Play size={16} fill="currentColor" />
           {t('player.nextEpisode', 'Next Episode')} — S{episodeContext.nextEpisode.seasonNumber}E{episodeContext.nextEpisode.episodeNumber}
@@ -932,7 +990,11 @@ export default function PlayerPage() {
               if (chromecast.isConnected && chromecast.isMediaLoaded) {
                 chromecast.playOrPause();
               } else {
-                const v = videoRef.current; if (v) v.paused ? v.play() : v.pause();
+                const v = videoRef.current;
+                if (v) {
+                  if (v.paused) v.play();
+                  else v.pause();
+                }
               }
             }}
             className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
@@ -959,6 +1021,9 @@ export default function PlayerPage() {
             onClick={() => {
               if (chromecast.isConnected && chromecast.isMediaLoaded) {
                 chromecast.seek(Math.max(0, chromecast.currentTime - 10));
+              } else if (useRemux) {
+                const v = videoRef.current;
+                if (v) reloadRemuxAt(Math.max(0, v.currentTime + seekOffsetRef.current - 10));
               } else {
                 const v = videoRef.current; if (v) v.currentTime = Math.max(0, v.currentTime - 10);
               }
@@ -974,6 +1039,9 @@ export default function PlayerPage() {
             onClick={() => {
               if (chromecast.isConnected && chromecast.isMediaLoaded) {
                 chromecast.seek(Math.min(chromecast.duration, chromecast.currentTime + 10));
+              } else if (useRemux) {
+                const v = videoRef.current;
+                if (v) reloadRemuxAt(Math.min(effectiveDuration || Infinity, v.currentTime + seekOffsetRef.current + 10));
               } else {
                 const v = videoRef.current; if (v) v.currentTime = Math.min(isFinite(v.duration) ? v.duration : Infinity, v.currentTime + 10);
               }

@@ -106,6 +106,7 @@ export interface SubtitleResponse {
   format: string;
   isExternal: boolean;
   isForced: boolean;
+  streamIndex: number | null;
 }
 
 export interface MediaImageResponse {

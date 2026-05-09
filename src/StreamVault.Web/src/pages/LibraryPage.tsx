@@ -38,26 +38,26 @@ export default function LibraryPage() {
   const totalPages = data ? Math.ceil(data.totalCount / data.pageSize) : 0;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="pt-6">
+      <div className="flex items-end justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-text dark:text-text-dark">{library?.name || t('nav.libraries')}</h1>
+          <h1 className="text-3xl font-bold text-text dark:text-text-dark">{library?.name || t('nav.libraries')}</h1>
           {data && <p className="text-sm text-muted dark:text-muted-dark">{data.totalCount} {t('library.items')}</p>}
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-3 mb-6">
+      <div className="flex flex-wrap gap-3 mb-7">
         <input
           placeholder={t('library.search')}
           value={search}
           onChange={(e) => updateParam('search', e.target.value)}
-          className="px-3 py-2 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text dark:text-text-dark text-sm w-48 focus:ring-2 focus:ring-primary outline-none"
+          className="px-4 py-2.5 rounded-md border border-white/10 bg-white/10 text-text dark:text-text-dark text-sm w-56 focus:ring-2 focus:ring-primary outline-none"
         />
         <select
           value={sort}
           onChange={(e) => updateParam('sort', e.target.value)}
-          className="px-3 py-2 rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark text-text dark:text-text-dark text-sm"
+          className="px-4 py-2.5 rounded-md border border-white/10 bg-white/10 text-text dark:text-text-dark text-sm"
         >
           <option value="title">{t('library.title')}</option>
           <option value="year">{t('library.year')}</option>
@@ -67,14 +67,14 @@ export default function LibraryPage() {
       </div>
 
       {isLoading && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 animate-pulse">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 animate-pulse">
           {[...Array(12)].map((_, i) => (
-            <div key={i} className="aspect-[2/3] rounded-lg bg-surface-secondary dark:bg-surface-secondary-dark" />
+            <div key={i} className="aspect-video rounded-lg bg-surface-secondary dark:bg-surface-secondary-dark" />
           ))}
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
         {data?.items.map((item) => (
           <MediaCard key={item.id} item={item} />
         ))}

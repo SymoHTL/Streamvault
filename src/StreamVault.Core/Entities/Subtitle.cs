@@ -7,6 +7,7 @@ public class Subtitle : BaseEntity
     public string Language { get; set; } = string.Empty;
     public string? S3Key { get; set; }
     public string? LocalPath { get; set; }
+    public int? StreamIndex { get; set; }
     public SubtitleFormat Format { get; set; }
     public bool IsExternal { get; set; }
     public bool IsForced { get; set; }

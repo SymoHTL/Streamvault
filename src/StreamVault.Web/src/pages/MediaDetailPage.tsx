@@ -108,18 +108,27 @@ export default function MediaDetailPage() {
     navigate(`/player/${selectedFile.id}${qs ? `?${qs}` : ''}`);
   };
 
-  // Find the in-progress episode (if any) once, so the play button + the
-  // resume chip show consistent info instead of recomputing on each render.
+  // Match homepage Continue Watching: resume the latest watched in-progress episode.
   const inProgressEpisode = (() => {
     if (media.mediaType !== 'TvShow' || !tvData) return null;
+    let latest: {
+      season: TvShowDetailResponse['seasons'][number];
+      episode: TvShowDetailResponse['seasons'][number]['episodes'][number];
+    } | null = null;
     for (const season of tvData.seasons) {
       for (const ep of season.episodes) {
         if (ep.progress && !ep.progress.completed && ep.progress.positionTicks > 0) {
-          return { season, episode: ep };
+          if (
+            !latest ||
+            new Date(ep.progress.lastWatchedAt).getTime() >
+              new Date(latest.episode.progress!.lastWatchedAt).getTime()
+          ) {
+            latest = { season, episode: ep };
+          }
         }
       }
     }
-    return null;
+    return latest;
   })();
 
   const resumePct = inProgressEpisode?.episode.progress?.durationSeconds
@@ -135,11 +144,9 @@ export default function MediaDetailPage() {
       return;
     }
     if (inProgressEpisode) {
-      const mf = inProgressEpisode.episode.mediaFiles[0];
-      if (mf) {
-        navigate(`/player/${mf.id}?t=${inProgressEpisode.episode.progress!.positionTicks}`);
-        return;
-      }
+      const progress = inProgressEpisode.episode.progress!;
+      navigate(`/player/${progress.mediaFileId}?t=${progress.positionTicks}`);
+      return;
     }
     // No in-progress episode — find the first unwatched
     for (const season of tvData.seasons) {
@@ -667,6 +674,10 @@ function TvShowSeasons({ data }: { data: TvShowDetailResponse }) {
               ? Math.round((ep.progress.positionTicks / (ep.progress.durationSeconds * 10_000_000)) * 100)
               : null;
             const isCompleted = ep.progress?.completed;
+            const playMediaFileId = ep.progress && !ep.progress.completed ? ep.progress.mediaFileId : mf?.id;
+            const playUrl = playMediaFileId
+              ? `/player/${playMediaFileId}${ep.progress && !ep.progress.completed ? `?t=${ep.progress.positionTicks}` : ''}`
+              : null;
 
             return (
               <div
@@ -674,8 +685,8 @@ function TvShowSeasons({ data }: { data: TvShowDetailResponse }) {
                 role="button"
                 tabIndex={0}
                 className="group flex flex-col sm:flex-row gap-4 p-3 rounded-xl hover:bg-surface-secondary/60 dark:hover:bg-surface-secondary-dark/60 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                onClick={() => mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { mf && navigate(`/player/${mf.id}${ep.progress ? `?t=${ep.progress.positionTicks}` : ''}`); } }}
+                onClick={() => { if (playUrl) navigate(playUrl); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && playUrl) navigate(playUrl); }}
               >
                 {/* Thumbnail (16:9, Netflix-style) */}
                 <div className="relative shrink-0 w-full sm:w-64 aspect-video rounded-lg overflow-hidden bg-surface-secondary dark:bg-surface-secondary-dark">
